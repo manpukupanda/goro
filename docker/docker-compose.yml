@@ -1,13 +1,13 @@
-version: "3.9"
-
 services:
-
   goro:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/Dockerfile.dev
     volumes:
+      - ..:/app
       - ../data:/app/data
+      - goro-go-build-cache:/root/.cache/go-build
+      - goro-go-mod-cache:/go/pkg/mod
     ports:
       - "8080:8080"
     environment:
@@ -28,3 +28,7 @@ services:
     environment:
       - MINIO_ROOT_USER=minio
       - MINIO_ROOT_PASSWORD=minio123
+
+volumes:
+  goro-go-build-cache:
+  goro-go-mod-cache:

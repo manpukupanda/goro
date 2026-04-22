@@ -1,0 +1,13 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+poll = true
+poll_interval = 500 # ms
+cmd = "go build -o ./tmp/goro ./cmd/goro"
+bin = "tmp/goro"
+include_ext = ["go", "mod", "sum"]
+exclude_dir = ["tmp", "data", "docker", ".git"]
+
+[run]
+cmd = "./tmp/goro"

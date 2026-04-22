@@ -1,0 +1,18 @@
+FROM golang:1.25
+
+WORKDIR /app
+
+# Runtime deps you want to validate in dev too
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sqlite3 ffmpeg ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Hot reload tool (Air)
+RUN go install github.com/air-verse/air@latest
+
+# Nice-to-have: makes sure cgo is on like your current build
+ENV CGO_ENABLED=1
+
+EXPOSE 8080
+
+CMD ["air", "-c", ".air.toml"]
