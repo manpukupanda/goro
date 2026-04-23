@@ -2,8 +2,10 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"goro/internal/api"
+	"goro/internal/config"
 	"goro/internal/db"
 	"goro/internal/queue"
 	"goro/internal/storage"
@@ -11,22 +13,34 @@ import (
 )
 
 func main() {
-	// DB
+	cfgPath := os.Getenv("GORO_CONFIG")
+	if cfgPath == "" {
+		cfgPath = "configs/config.yaml"
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+
 	database, err := db.Open("data/goro.db")
 	if err != nil {
 		log.Fatalf("failed to open db: %v", err)
 	}
 
-	// Queue
 	q := queue.New(database)
 
-	// Storage (S3/MinIO)
-	s3 := storage.New()
+	s3, err := storage.New(cfg.S3)
+	if err != nil {
+		log.Fatalf("failed to initialize storage: %v", err)
+	}
 
-	// Worker (HLS / thumbnail)
-	go worker.Start(q, s3)
+	// Start the configured number of worker goroutines. Keep this value low;
+	// ffmpeg is CPU-intensive and excessive parallelism degrades encoding performance.
+	for i := 0; i < cfg.Worker.Concurrency; i++ {
+		go worker.Start(q, s3, cfg.HLS)
+	}
 
-	// API
-	server := api.NewServer(q, s3)
+	server := api.NewServer(q)
 	server.Start(":8080")
 }

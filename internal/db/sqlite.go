@@ -12,15 +12,41 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	// 最小の jobs テーブル
-	db.Exec(`
-CREATE TABLE IF NOT EXISTS jobs (
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS videos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    status TEXT,
-    input TEXT,
+    public_id TEXT UNIQUE NOT NULL,
+    original_name TEXT NOT NULL,
+    temp_path TEXT NOT NULL,
+    status TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-`)
+`); err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    input TEXT NOT NULL,
+    error_message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(video_id) REFERENCES videos(id)
+);
+`); err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at)`); err != nil {
+		return nil, err
+	}
 
 	return db, nil
 }

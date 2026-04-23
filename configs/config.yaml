@@ -1,0 +1,33 @@
+s3:
+  endpoint: minio:9000
+  access_key: minio
+  secret_key: minio123
+  bucket: goro
+  use_ssl: false
+  region: us-east-1
+
+worker:
+  # Keep concurrency low; ffmpeg is CPU-intensive and excessive parallelism
+  # will saturate the host and degrade encoding performance.
+  concurrency: 2
+
+hls:
+  profiles:
+    - name: 1080p
+      width: 1920
+      height: 1080
+      video_bitrate: 5000k
+      audio_bitrate: 192k
+      segment_seconds: 4
+    - name: 720p
+      width: 1280
+      height: 720
+      video_bitrate: 2800k
+      audio_bitrate: 128k
+      segment_seconds: 4
+    - name: 480p
+      width: 854
+      height: 480
+      video_bitrate: 1200k
+      audio_bitrate: 96k
+      segment_seconds: 4
