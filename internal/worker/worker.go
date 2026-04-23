@@ -107,7 +107,18 @@ func uploadProfileOutputs(ctx context.Context, s uploader, publicID string, prof
 		filename := entry.Name()
 		filePath := filepath.Join(profileDir, filename)
 		objectPath := fmt.Sprintf("videos/%s/%s/%s", publicID, profileName, filename)
-		if err := s.UploadFile(ctx, objectPath, filePath, mime.TypeByExtension(filepath.Ext(filename))); err != nil {
+
+		ext := filepath.Ext(filename)
+		contentType := mime.TypeByExtension(ext)
+
+		switch ext {
+		case ".m3u8":
+			contentType = "application/vnd.apple.mpegurl"
+		case ".ts":
+			contentType = "video/mp2t"
+		}
+
+		if err := s.UploadFile(ctx, objectPath, filePath, contentType); err != nil {
 			return err
 		}
 	}
