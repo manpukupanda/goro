@@ -1,9 +1,25 @@
 package queue
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"log"
 )
+
+const base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// newPublicID returns a cryptographically random Base62 string of the given length.
+func newPublicID(length int) (string, error) {
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	b62 := make([]byte, length)
+	for i, b := range buf {
+		b62[i] = base62Chars[int(b)%len(base62Chars)]
+	}
+	return string(b62), nil
+}
 
 type Queue struct {
 	db *sql.DB
@@ -12,6 +28,7 @@ type Queue struct {
 type Job struct {
 	ID       int64
 	VideoID  int64
+	PublicID string
 	InputMP4 string
 }
 
@@ -19,31 +36,36 @@ func New(db *sql.DB) *Queue {
 	return &Queue{db: db}
 }
 
-func (q *Queue) EnqueueVideo(originalName, inputPath string) (int64, error) {
+func (q *Queue) EnqueueVideo(originalName, inputPath string) (string, error) {
+	publicID, err := newPublicID(11)
+	if err != nil {
+		return "", err
+	}
+
 	tx, err := q.db.Begin()
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec(`INSERT INTO videos (original_name, temp_path, status) VALUES (?, ?, 'queued')`, originalName, inputPath)
+	res, err := tx.Exec(`INSERT INTO videos (public_id, original_name, temp_path, status) VALUES (?, ?, ?, 'queued')`, publicID, originalName, inputPath)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	videoID, err := res.LastInsertId()
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
 	if _, err := tx.Exec(`INSERT INTO jobs (video_id, status, input) VALUES (?, 'pending', ?)`, videoID, inputPath); err != nil {
-		return 0, err
+		return "", err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return "", err
 	}
 
-	return videoID, nil
+	return publicID, nil
 }
 
 func (q *Queue) FetchPending() *Job {
@@ -55,8 +77,14 @@ func (q *Queue) FetchPending() *Job {
 	defer tx.Rollback()
 
 	var job Job
-	err = tx.QueryRow(`SELECT id, video_id, input FROM jobs WHERE status='pending' ORDER BY id LIMIT 1`).
-		Scan(&job.ID, &job.VideoID, &job.InputMP4)
+	err = tx.QueryRow(`
+SELECT j.id, j.video_id, v.public_id, j.input
+FROM jobs j
+JOIN videos v ON v.id = j.video_id
+WHERE j.status='pending'
+ORDER BY j.id
+LIMIT 1
+`).Scan(&job.ID, &job.VideoID, &job.PublicID, &job.InputMP4)
 	if err == sql.ErrNoRows {
 		return nil
 	}

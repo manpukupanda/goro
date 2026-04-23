@@ -56,7 +56,7 @@ func processJob(ctx context.Context, s uploader, job *queue.Job, hlsConfig confi
 			return err
 		}
 
-		if err := uploadProfileOutputs(ctx, s, job.VideoID, profile.Name, profileDir); err != nil {
+		if err := uploadProfileOutputs(ctx, s, job.PublicID, profile.Name, profileDir); err != nil {
 			return err
 		}
 	}
@@ -94,7 +94,7 @@ func buildFFmpegArgs(inputPath string, profile config.HLSProfile, profileDir str
 	}
 }
 
-func uploadProfileOutputs(ctx context.Context, s uploader, videoID int64, profileName, profileDir string) error {
+func uploadProfileOutputs(ctx context.Context, s uploader, publicID string, profileName, profileDir string) error {
 	entries, err := os.ReadDir(profileDir)
 	if err != nil {
 		return err
@@ -106,7 +106,7 @@ func uploadProfileOutputs(ctx context.Context, s uploader, videoID int64, profil
 		}
 		filename := entry.Name()
 		filePath := filepath.Join(profileDir, filename)
-		objectPath := fmt.Sprintf("videos/%d/%s/%s", videoID, profileName, filename)
+		objectPath := fmt.Sprintf("videos/%s/%s/%s", publicID, profileName, filename)
 		if err := s.UploadFile(ctx, objectPath, filePath, mime.TypeByExtension(filepath.Ext(filename))); err != nil {
 			return err
 		}

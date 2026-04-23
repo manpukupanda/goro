@@ -44,13 +44,13 @@ func TestUploadVideoCreatesVideoAndJob(t *testing.T) {
 	}
 
 	var response struct {
-		VideoID int64 `json:"video_id"`
+		VideoID string `json:"video_id"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if response.VideoID <= 0 {
-		t.Fatalf("expected positive video_id, got %d", response.VideoID)
+	if len(response.VideoID) != 11 {
+		t.Fatalf("expected public_id of length 11, got %q (len %d)", response.VideoID, len(response.VideoID))
 	}
 
 	var (
@@ -62,7 +62,7 @@ func TestUploadVideoCreatesVideoAndJob(t *testing.T) {
 SELECT v.status, v.temp_path, j.status
 FROM videos v
 JOIN jobs j ON j.video_id = v.id
-WHERE v.id = ?
+WHERE v.public_id = ?
 `, response.VideoID).Scan(&videoStatus, &inputPath, &jobStatus)
 	if err != nil {
 		t.Fatalf("failed to query inserted records: %v", err)

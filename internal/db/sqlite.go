@@ -19,6 +19,7 @@ func Open(path string) (*sql.DB, error) {
 	if _, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS videos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    public_id TEXT UNIQUE NOT NULL,
     original_name TEXT NOT NULL,
     temp_path TEXT NOT NULL,
     status TEXT NOT NULL,

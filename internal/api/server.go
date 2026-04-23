@@ -60,13 +60,13 @@ func (s *Server) uploadVideo(c *gin.Context) {
 		return
 	}
 
-	videoID, err := s.queue.EnqueueVideo(file.Filename, inputPath)
+	publicID, err := s.queue.EnqueueVideo(file.Filename, inputPath)
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create video job"})
 		return
 	}
 
-	log.Printf("queued video %d (%s)", videoID, file.Filename)
-	c.JSON(http.StatusAccepted, gin.H{"video_id": videoID})
+	log.Printf("queued video %s (%s)", publicID, file.Filename)
+	c.JSON(http.StatusAccepted, gin.H{"video_id": publicID})
 }
