@@ -6,6 +6,11 @@ s3:
   use_ssl: false
   region: us-east-1
 
+worker:
+  # Keep concurrency low; ffmpeg is CPU-intensive and excessive parallelism
+  # will saturate the host and degrade encoding performance.
+  concurrency: 2
+
 hls:
   profiles:
     - name: 1080p

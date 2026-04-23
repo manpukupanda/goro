@@ -35,7 +35,11 @@ func main() {
 		log.Fatalf("failed to initialize storage: %v", err)
 	}
 
-	go worker.Start(q, s3, cfg.HLS)
+	// Start the configured number of worker goroutines. Keep this value low;
+	// ffmpeg is CPU-intensive and excessive parallelism degrades encoding performance.
+	for i := 0; i < cfg.Worker.Concurrency; i++ {
+		go worker.Start(q, s3, cfg.HLS)
+	}
 
 	server := api.NewServer(q)
 	server.Start(":8080")

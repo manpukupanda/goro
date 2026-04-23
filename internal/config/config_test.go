@@ -37,4 +37,7 @@ hls:
 	if got := cfg.HLS.Profiles[0].SegmentSeconds; got != 4 {
 		t.Fatalf("expected default segment_seconds 4, got %d", got)
 	}
+	if cfg.Worker.Concurrency != 2 {
+		t.Fatalf("expected default worker concurrency 2, got %d", cfg.Worker.Concurrency)
+	}
 }

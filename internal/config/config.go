@@ -8,8 +8,16 @@ import (
 )
 
 type Config struct {
-	S3  S3Config  `yaml:"s3"`
-	HLS HLSConfig `yaml:"hls"`
+	S3     S3Config     `yaml:"s3"`
+	HLS    HLSConfig    `yaml:"hls"`
+	Worker WorkerConfig `yaml:"worker"`
+}
+
+type WorkerConfig struct {
+	// Concurrency controls how many worker goroutines run in parallel.
+	// Keep this value low; ffmpeg is CPU-intensive and excessive parallelism
+	// will saturate the host and degrade encoding performance.
+	Concurrency int `yaml:"concurrency"`
 }
 
 type S3Config struct {
@@ -72,6 +80,10 @@ func (c *Config) validateAndApplyDefaults() error {
 		if p.SegmentSeconds <= 0 {
 			p.SegmentSeconds = 4
 		}
+	}
+
+	if c.Worker.Concurrency <= 0 {
+		c.Worker.Concurrency = 2
 	}
 
 	return nil
