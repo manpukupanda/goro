@@ -1,0 +1,25 @@
+events {}
+
+http {
+    server {
+        listen 80;
+
+        # HLS segment delivery with nginx secure_link verification.
+        # Requests must carry ?expires=<unix>&md5=<base64url_md5> query params.
+        # The MD5 is computed as: base64url(md5("$secure_link_expires$uri${SECURE_LINK_SECRET}"))
+        # where $uri is the request path without query string.
+        location ~ ^/hls/ {
+            secure_link $arg_md5,$arg_expires;
+            secure_link_md5 "$secure_link_expires$uri${SECURE_LINK_SECRET}";
+
+            if ($secure_link = "") { return 403; }
+            if ($secure_link = "0") { return 410; }
+
+            proxy_pass http://goro:8080;
+        }
+
+        location / {
+            proxy_pass http://goro:8080;
+        }
+    }
+}

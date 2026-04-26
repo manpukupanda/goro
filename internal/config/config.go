@@ -7,10 +7,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const defaultSecureLinkTTLSec = 3600
+
 type Config struct {
-	S3     S3Config     `yaml:"s3"`
-	HLS    HLSConfig    `yaml:"hls"`
-	Worker WorkerConfig `yaml:"worker"`
+	S3         S3Config         `yaml:"s3"`
+	HLS        HLSConfig        `yaml:"hls"`
+	Worker     WorkerConfig     `yaml:"worker"`
+	SecureLink SecureLinkConfig `yaml:"secure_link"`
+}
+
+type SecureLinkConfig struct {
+	// Secret is the shared key used to sign HLS segment URLs.
+	// Can be overridden at runtime with the SECURE_LINK_SECRET environment variable.
+	Secret string `yaml:"secret"`
+	// TTLSec is how long (in seconds) a signed URL remains valid. Defaults to 3600.
+	TTLSec int `yaml:"ttl_sec"`
 }
 
 type WorkerConfig struct {
@@ -84,6 +95,16 @@ func (c *Config) validateAndApplyDefaults() error {
 
 	if c.Worker.Concurrency <= 0 {
 		c.Worker.Concurrency = 2
+	}
+
+	// Allow the secure-link secret to be supplied (or overridden) via the
+	// SECURE_LINK_SECRET environment variable so that docker-compose can
+	// inject it without modifying the config file.
+	if envSecret := os.Getenv("SECURE_LINK_SECRET"); envSecret != "" {
+		c.SecureLink.Secret = envSecret
+	}
+	if c.SecureLink.TTLSec <= 0 {
+		c.SecureLink.TTLSec = defaultSecureLinkTTLSec
 	}
 
 	return nil

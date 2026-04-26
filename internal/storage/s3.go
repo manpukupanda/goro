@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"io"
 
 	"goro/internal/config"
 
@@ -44,4 +45,20 @@ func (s *S3) UploadFile(ctx context.Context, objectName, filePath, contentType s
 	}
 	_, err := s.client.FPutObject(ctx, s.bucket, objectName, filePath, minio.PutObjectOptions{ContentType: contentType})
 	return err
+}
+
+// GetObject fetches an object from MinIO and returns a ReadCloser along with
+// the object's size in bytes.  The caller is responsible for closing the
+// returned ReadCloser.
+func (s *S3) GetObject(ctx context.Context, objectName string) (io.ReadCloser, int64, error) {
+	obj, err := s.client.GetObject(ctx, s.bucket, objectName, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, 0, err
+	}
+	stat, err := obj.Stat()
+	if err != nil {
+		_ = obj.Close()
+		return nil, 0, err
+	}
+	return obj, stat.Size, nil
 }

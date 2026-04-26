@@ -41,6 +41,6 @@ func main() {
 		go worker.Start(q, s3, cfg.HLS)
 	}
 
-	server := api.NewServer(q)
+	server := api.NewServer(q, s3, cfg.SecureLink, cfg.HLS)
 	server.Start(":8080")
 }
