@@ -151,8 +151,14 @@ func rewritePlaylist(r io.Reader, videoID, profile string, expires int64, secret
 // that nginx's secure_link_md5 directive produces for the formula:
 //
 //	md5("$secure_link_expires$uri$secret")
+//
+// MD5 is used here because it is the algorithm mandated by the nginx
+// ngx_http_secure_link_module; this function must produce output that matches
+// nginx's own computation exactly.  The MD5 digest is not used as a
+// general-purpose cryptographic hash — its sole purpose is URL-token
+// verification in coordination with the nginx module.
 func computeSecureLinkMD5(expires int64, uri, secret string) string {
-	h := md5.Sum([]byte(fmt.Sprintf("%d%s%s", expires, uri, secret)))
+	h := md5.Sum([]byte(fmt.Sprintf("%d%s%s", expires, uri, secret))) //nolint:gosec
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 

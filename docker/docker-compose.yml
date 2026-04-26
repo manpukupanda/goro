@@ -12,7 +12,9 @@ services:
       - "8080:8080"
     environment:
       - S3_ENDPOINT=http://minio:9000
-      - SECURE_LINK_SECRET=change-me-in-production
+      # Set SECURE_LINK_SECRET to a strong random value before starting.
+      # The same value must be set on the nginx container below.
+      - SECURE_LINK_SECRET=${SECURE_LINK_SECRET:?SECURE_LINK_SECRET must be set}
 
   nginx:
     image: nginx
@@ -21,7 +23,8 @@ services:
     ports:
       - "80:80"
     environment:
-      - SECURE_LINK_SECRET=change-me-in-production
+      # Must match the SECURE_LINK_SECRET set on the goro service.
+      - SECURE_LINK_SECRET=${SECURE_LINK_SECRET:?SECURE_LINK_SECRET must be set}
 
   minio:
     image: minio/minio
