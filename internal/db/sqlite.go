@@ -23,7 +23,31 @@ CREATE TABLE IF NOT EXISTS videos (
     original_name TEXT NOT NULL,
     temp_path TEXT NOT NULL,
     status TEXT NOT NULL,
+    visibility TEXT NOT NULL DEFAULT 'public',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`); err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS video_permissions (
+    video_id INTEGER NOT NULL,
+    user_id  INTEGER NOT NULL,
+    PRIMARY KEY (video_id, user_id),
+    FOREIGN KEY (video_id) REFERENCES videos(id)
+);
+`); err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS playlist_tokens (
+    token      TEXT PRIMARY KEY,
+    video_id   INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL,
+    expires_at DATETIME NOT NULL,
+    FOREIGN KEY (video_id) REFERENCES videos(id)
 );
 `); err != nil {
 		return nil, err

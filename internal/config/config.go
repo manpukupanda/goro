@@ -8,12 +8,14 @@ import (
 )
 
 const defaultSecureLinkTTLSec = 3600
+const defaultPlaylistTokenTTLSec = 900
 
 type Config struct {
-	S3         S3Config         `yaml:"s3"`
-	HLS        HLSConfig        `yaml:"hls"`
-	Worker     WorkerConfig     `yaml:"worker"`
-	SecureLink SecureLinkConfig `yaml:"secure_link"`
+	S3            S3Config            `yaml:"s3"`
+	HLS           HLSConfig           `yaml:"hls"`
+	Worker        WorkerConfig        `yaml:"worker"`
+	SecureLink    SecureLinkConfig    `yaml:"secure_link"`
+	PlaylistToken PlaylistTokenConfig `yaml:"playlist_token"`
 }
 
 type SecureLinkConfig struct {
@@ -21,6 +23,13 @@ type SecureLinkConfig struct {
 	// Can be overridden at runtime with the SECURE_LINK_SECRET environment variable.
 	Secret string `yaml:"secret"`
 	// TTLSec is how long (in seconds) a signed URL remains valid. Defaults to 3600.
+	TTLSec int `yaml:"ttl_sec"`
+}
+
+// PlaylistTokenConfig controls the short-lived opaque tokens used to grant
+// access to private video playlists.
+type PlaylistTokenConfig struct {
+	// TTLSec is how long (in seconds) a playlist token remains valid. Defaults to 900.
 	TTLSec int `yaml:"ttl_sec"`
 }
 
@@ -105,6 +114,10 @@ func (c *Config) validateAndApplyDefaults() error {
 	}
 	if c.SecureLink.TTLSec <= 0 {
 		c.SecureLink.TTLSec = defaultSecureLinkTTLSec
+	}
+
+	if c.PlaylistToken.TTLSec <= 0 {
+		c.PlaylistToken.TTLSec = defaultPlaylistTokenTTLSec
 	}
 
 	return nil
