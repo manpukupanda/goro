@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/md5"
+	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -27,14 +29,16 @@ type storageGetter interface {
 }
 
 type Server struct {
-	queue      *queue.Queue
-	storage    storageGetter
-	secureLink config.SecureLinkConfig
-	hlsConfig  config.HLSConfig
+	db          *sql.DB
+	queue       *queue.Queue
+	storage     storageGetter
+	secureLink  config.SecureLinkConfig
+	hlsConfig   config.HLSConfig
+	tokenConfig config.PlaylistTokenConfig
 }
 
-func NewServer(q *queue.Queue, s storageGetter, slCfg config.SecureLinkConfig, hlsCfg config.HLSConfig) *Server {
-	return &Server{queue: q, storage: s, secureLink: slCfg, hlsConfig: hlsCfg}
+func NewServer(database *sql.DB, q *queue.Queue, s storageGetter, slCfg config.SecureLinkConfig, hlsCfg config.HLSConfig, tokenCfg config.PlaylistTokenConfig) *Server {
+	return &Server{db: database, queue: q, storage: s, secureLink: slCfg, hlsConfig: hlsCfg, tokenConfig: tokenCfg}
 }
 
 func (s *Server) Router() *gin.Engine {
@@ -46,6 +50,12 @@ func (s *Server) Router() *gin.Engine {
 	r.POST("/videos", s.uploadVideo)
 	r.GET("/videos/:id/playlist", s.getPlaylist)
 	r.GET("/hls/videos/:id/:profile/:segment", s.getSegment)
+
+	// Management endpoints
+	r.PUT("/videos/:id/visibility", s.setVisibility)
+	r.POST("/videos/:id/permissions", s.addPermission)
+	r.DELETE("/videos/:id/permissions/:user_id", s.removePermission)
+	r.POST("/videos/:id/tokens", s.issueToken)
 
 	return r
 }
@@ -92,8 +102,16 @@ func (s *Server) uploadVideo(c *gin.Context) {
 
 // getPlaylist fetches the HLS playlist for a video from MinIO, rewrites each
 // segment line with a secure-link signed URL, and returns the modified playlist.
+// For private videos, a valid playlist token must be supplied via the ?token= query parameter.
 func (s *Server) getPlaylist(c *gin.Context) {
 	id := c.Param("id")
+
+	// Check visibility when a DB is configured.
+	if s.db != nil {
+		if err := s.authorizePlaylist(c, id); err != nil {
+			return
+		}
+	}
 
 	profile := c.Query("profile")
 	if profile == "" && len(s.hlsConfig.Profiles) > 0 {
@@ -121,6 +139,219 @@ func (s *Server) getPlaylist(c *gin.Context) {
 
 	c.Header("Content-Type", "application/vnd.apple.mpegurl")
 	c.String(http.StatusOK, out)
+}
+
+// authorizePlaylist checks whether the request is authorized to access the playlist.
+// Returns nil if authorized (or video is public), non-nil and writes a response if not.
+func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
+	var videoID int64
+	var visibility string
+	err := s.db.QueryRowContext(c.Request.Context(),
+		`SELECT id, visibility FROM videos WHERE public_id = ?`, publicID).Scan(&videoID, &visibility)
+	if err == sql.ErrNoRows {
+		// Video not found in DB yet (e.g., still processing) — allow access.
+		return nil
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		return err
+	}
+
+	if visibility == "public" {
+		return nil
+	}
+
+	// Private: validate token.
+	token := c.Query("token")
+	if token == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "token is required"})
+		return fmt.Errorf("missing token")
+	}
+
+	var userID int64
+	var expiresAtStr string
+	err = s.db.QueryRowContext(c.Request.Context(),
+		`SELECT user_id, expires_at FROM playlist_tokens WHERE token = ? AND video_id = ?`,
+		token, videoID).Scan(&userID, &expiresAtStr)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid or expired token"})
+		return fmt.Errorf("token not found")
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate token"})
+		return err
+	}
+
+	expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse token expiry"})
+		return err
+	}
+	if time.Now().After(expiresAt) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid or expired token"})
+		return fmt.Errorf("token expired")
+	}
+
+	var exists int
+	err = s.db.QueryRowContext(c.Request.Context(),
+		`SELECT 1 FROM video_permissions WHERE video_id = ? AND user_id = ?`, videoID, userID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusForbidden, gin.H{"error": "user does not have permission for this video"})
+		return fmt.Errorf("permission denied")
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check permission"})
+		return err
+	}
+
+	return nil
+}
+
+// setVisibility updates the visibility of a video to either "public" or "private".
+func (s *Server) setVisibility(c *gin.Context) {
+	publicID := c.Param("id")
+	var body struct {
+		Visibility string `json:"visibility" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "visibility is required"})
+		return
+	}
+	if body.Visibility != "public" && body.Visibility != "private" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "visibility must be 'public' or 'private'"})
+		return
+	}
+
+	res, err := s.db.ExecContext(c.Request.Context(),
+		`UPDATE videos SET visibility = ? WHERE public_id = ?`, body.Visibility, publicID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update visibility"})
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"visibility": body.Visibility})
+}
+
+// addPermission grants a user permission to view a private video.
+func (s *Server) addPermission(c *gin.Context) {
+	publicID := c.Param("id")
+	var body struct {
+		UserID int64 `json:"user_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required"})
+		return
+	}
+
+	var videoID int64
+	err := s.db.QueryRowContext(c.Request.Context(),
+		`SELECT id FROM videos WHERE public_id = ?`, publicID).Scan(&videoID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		return
+	}
+
+	_, err = s.db.ExecContext(c.Request.Context(),
+		`INSERT OR IGNORE INTO video_permissions (video_id, user_id) VALUES (?, ?)`, videoID, body.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add permission"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// removePermission revokes a user's permission to view a private video.
+func (s *Server) removePermission(c *gin.Context) {
+	publicID := c.Param("id")
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
+		return
+	}
+
+	var videoID int64
+	err = s.db.QueryRowContext(c.Request.Context(),
+		`SELECT id FROM videos WHERE public_id = ?`, publicID).Scan(&videoID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		return
+	}
+
+	_, err = s.db.ExecContext(c.Request.Context(),
+		`DELETE FROM video_permissions WHERE video_id = ? AND user_id = ?`, videoID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove permission"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// issueToken issues a short-lived opaque token for accessing a private video's playlist.
+func (s *Server) issueToken(c *gin.Context) {
+	publicID := c.Param("id")
+	var body struct {
+		UserID int64 `json:"user_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required"})
+		return
+	}
+
+	var videoID int64
+	err := s.db.QueryRowContext(c.Request.Context(),
+		`SELECT id FROM videos WHERE public_id = ?`, publicID).Scan(&videoID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		return
+	}
+
+	var exists int
+	err = s.db.QueryRowContext(c.Request.Context(),
+		`SELECT 1 FROM video_permissions WHERE video_id = ? AND user_id = ?`, videoID, body.UserID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusForbidden, gin.H{"error": "user does not have permission for this video"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check permission"})
+		return
+	}
+
+	token, err := newToken(32)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		return
+	}
+	expiresAt := time.Now().Add(time.Duration(s.tokenConfig.TTLSec) * time.Second)
+
+	_, err = s.db.ExecContext(c.Request.Context(),
+		`INSERT INTO playlist_tokens (token, video_id, user_id, expires_at) VALUES (?, ?, ?, ?)`,
+		token, videoID, body.UserID, expiresAt.UTC().Format(time.RFC3339))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store token"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"token":      token,
+		"expires_at": expiresAt.UTC().Format(time.RFC3339),
+	})
 }
 
 // rewritePlaylist reads an m3u8 from r and returns it with each segment line
@@ -183,4 +414,19 @@ func (s *Server) getSegment(c *gin.Context) {
 	if _, err := io.Copy(c.Writer, rc); err != nil {
 		log.Printf("error streaming segment %s: %v", objectName, err)
 	}
+}
+
+const base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// newToken returns a cryptographically random Base62 string of the given length.
+func newToken(length int) (string, error) {
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	b62 := make([]byte, length)
+	for i, b := range buf {
+		b62[i] = base62Chars[int(b)%len(base62Chars)]
+	}
+	return string(b62), nil
 }

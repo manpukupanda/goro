@@ -18,6 +18,10 @@ secure_link:
   secret: ""
   ttl_sec: 3600
 
+playlist_token:
+  # How long (in seconds) a playlist access token remains valid.
+  ttl_sec: 900
+
 hls:
   profiles:
     - name: 1080p
