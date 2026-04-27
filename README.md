@@ -4,6 +4,17 @@ Lightweight video processing backend (Go + SQLite + S3).
 
 ## Development
 
+Before starting for the first time, create a `.env` file in the `docker/` directory:
+
+```
+cp docker/.env.example docker/.env
+```
+
+The `.env.example` file contains a development-safe default value for `SECURE_LINK_SECRET`.
+Edit `docker/.env` if you want to use a different value.
+
+Then start the stack:
+
 ```
 make docker-up
 ```

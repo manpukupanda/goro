@@ -11,6 +11,13 @@ worker:
   # will saturate the host and degrade encoding performance.
   concurrency: 2
 
+secure_link:
+  # Secret used to sign HLS segment URLs.  Must be set via the
+  # SECURE_LINK_SECRET environment variable (or here for non-production use).
+  # Keep this value identical to the one set on the nginx container.
+  secret: ""
+  ttl_sec: 3600
+
 hls:
   profiles:
     - name: 1080p
