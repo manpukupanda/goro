@@ -149,8 +149,8 @@ func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
 	err := s.db.QueryRowContext(c.Request.Context(),
 		`SELECT id, visibility FROM videos WHERE public_id = ?`, publicID).Scan(&videoID, &visibility)
 	if err == sql.ErrNoRows {
-		// Video not found in DB yet (e.g., still processing) — allow access.
-		return nil
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return err
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
@@ -419,14 +419,25 @@ func (s *Server) getSegment(c *gin.Context) {
 const base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 // newToken returns a cryptographically random Base62 string of the given length.
+// Rejection sampling is used to ensure a uniform distribution across all 62 characters.
 func newToken(length int) (string, error) {
-	buf := make([]byte, length)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	b62 := make([]byte, length)
-	for i, b := range buf {
-		b62[i] = base62Chars[int(b)%len(base62Chars)]
+	// Accept bytes only in the range [0, maxAccept) to avoid modulo bias.
+	// maxAccept is the largest multiple of len(base62Chars) that fits in a byte.
+	const maxAccept = byte(len(base62Chars) * (256 / len(base62Chars)))
+	b62 := make([]byte, 0, length)
+	buf := make([]byte, length*2) // over-allocate to reduce re-reads
+	for len(b62) < length {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		for _, b := range buf {
+			if b < maxAccept {
+				b62 = append(b62, base62Chars[int(b)%len(base62Chars)])
+				if len(b62) == length {
+					break
+				}
+			}
+		}
 	}
 	return string(b62), nil
 }
