@@ -13,9 +13,25 @@ const defaultPlaylistTokenTTLSec = 900
 type Config struct {
 	S3            S3Config            `yaml:"s3"`
 	HLS           HLSConfig           `yaml:"hls"`
+	Thumbnails    ThumbnailConfig     `yaml:"thumbnails"`
 	Worker        WorkerConfig        `yaml:"worker"`
 	SecureLink    SecureLinkConfig    `yaml:"secure_link"`
 	PlaylistToken PlaylistTokenConfig `yaml:"playlist_token"`
+}
+
+// ThumbnailConfig holds the list of thumbnail specs to generate after HLS encoding.
+type ThumbnailConfig struct {
+	Specs []ThumbnailSpec `yaml:"specs"`
+}
+
+// ThumbnailSpec describes a single thumbnail to be generated.
+// Type must be either "fixed_second" or "representative".
+// For "fixed_second", DurationSec specifies the target time in seconds; 0 means
+// auto (>= 5 s video → 5 s, shorter → duration/2).
+type ThumbnailSpec struct {
+	Name        string  `yaml:"name"`
+	Type        string  `yaml:"type"`
+	DurationSec float64 `yaml:"duration_sec"`
 }
 
 type SecureLinkConfig struct {
@@ -99,6 +115,24 @@ func (c *Config) validateAndApplyDefaults() error {
 		}
 		if p.SegmentSeconds <= 0 {
 			p.SegmentSeconds = 4
+		}
+	}
+
+	if len(c.Thumbnails.Specs) == 0 {
+		c.Thumbnails.Specs = []ThumbnailSpec{
+			{Name: "fixed_5s", Type: "fixed_second"},
+			{Name: "representative", Type: "representative"},
+		}
+	}
+	for i, spec := range c.Thumbnails.Specs {
+		if spec.Name == "" {
+			return fmt.Errorf("thumbnail spec at index %d has no name", i)
+		}
+		if spec.Type != "fixed_second" && spec.Type != "representative" {
+			return fmt.Errorf("thumbnail spec %q has invalid type %q (must be fixed_second or representative)", spec.Name, spec.Type)
+		}
+		if spec.DurationSec < 0 {
+			return fmt.Errorf("thumbnail spec %q has negative duration_sec", spec.Name)
 		}
 	}
 

@@ -2,13 +2,17 @@
   import { api } from '../lib/api.js';
   import UploadModal from '../components/UploadModal.svelte';
   import VideoPlayer from '../components/VideoPlayer.svelte';
+  import ThumbnailImage from '../components/ThumbnailImage.svelte';
+  import ThumbnailModal from '../components/ThumbnailModal.svelte';
 
   let videos = $state([]);
   let profiles = $state([]);
+  let thumbnailSpecs = $state([]);
   let loading = $state(true);
   let error = $state('');
   let showUpload = $state(false);
   let playingVideo = $state(null);
+  let thumbnailVideo = $state(null);
   let togglingId = $state(null);
   let deletingId = $state(null);
   let downloadingId = $state(null);
@@ -20,6 +24,7 @@
       const [vRes, cRes] = await Promise.all([api.listVideos(), api.getConfig()]);
       videos = vRes.videos ?? [];
       profiles = cRes.profiles ?? [];
+      thumbnailSpecs = cRes.thumbnail_specs ?? [];
     } catch (err) {
       error = err.message;
     } finally {
@@ -105,6 +110,7 @@
             <th>File Name</th>
             <th>Status</th>
             <th>Visibility</th>
+            <th>Thumbnail</th>
             <th>Created At</th>
             <th>Actions</th>
           </tr>
@@ -119,6 +125,21 @@
                 <span class="badge {v.visibility === 'public' ? 'badge-public' : 'badge-private'}">
                   {v.visibility === 'public' ? 'Public' : 'Private'}
                 </span>
+              </td>
+              <td class="thumb-cell">
+                {#if v.status === 'ready' && thumbnailSpecs.length > 0}
+                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                  <div class="thumb-preview" onclick={() => { thumbnailVideo = v; }} title="クリックで拡大">
+                    <ThumbnailImage
+                      videoId={v.public_id}
+                      specName={thumbnailSpecs[0]}
+                      className="thumb-table-img"
+                      alt="thumbnail"
+                    />
+                  </div>
+                {:else}
+                  <span class="muted">—</span>
+                {/if}
               </td>
               <td class="mono">{v.created_at ?? ''}</td>
               <td class="actions-cell">
@@ -159,6 +180,10 @@
   <VideoPlayer video={playingVideo} {profiles} onClose={() => { playingVideo = null; }} />
 {/if}
 
+{#if thumbnailVideo}
+  <ThumbnailModal video={thumbnailVideo} {thumbnailSpecs} onClose={() => { thumbnailVideo = null; }} />
+{/if}
+
 <style>
   .page { padding: 1rem 1.5rem; }
   .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
@@ -190,6 +215,11 @@
   .btn-delete:hover:not(:disabled) { background: #fee2e2; }
   .btn-download { color: #2563eb; border-color: #93c5fd; }
   .btn-download:hover:not(:disabled) { background: #eff6ff; }
+  .thumb-cell { vertical-align: middle; }
+  .thumb-preview { cursor: pointer; display: inline-block; }
+  :global(.thumb-table-img) {
+    width: 80px; height: 50px; object-fit: cover; border-radius: 3px; display: block;
+  }
   .error { color: #dc2626; font-size: .875rem; }
   .muted { color: #9ca3af; }
 </style>
