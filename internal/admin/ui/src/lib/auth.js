@@ -1,8 +1,8 @@
-// Stores the pre-computed Basic Auth token (base64url of "user:pass") in
+// Stores the pre-computed Basic Auth token (base64 of "user:pass") in
 // sessionStorage. The raw password is never stored.
 const KEY = 'goro_admin_auth';
 
-export function getCredentials() {
+export function isAuthenticated() {
   return sessionStorage.getItem(KEY) !== null;
 }
 

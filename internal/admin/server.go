@@ -121,7 +121,9 @@ func (s *Server) Router() *gin.Engine {
 func (s *Server) Start(addr string) {
 	r := s.Router()
 	log.Printf("Admin console listening on %s", addr)
-	r.Run(addr) //nolint:errcheck
+	if err := r.Run(addr); err != nil {
+		log.Fatalf("admin console server error: %v", err)
+	}
 }
 
 // listVideos returns all videos ordered by created_at descending.

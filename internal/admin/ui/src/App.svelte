@@ -1,10 +1,10 @@
 <script>
-  import { getCredentials } from './lib/auth.js';
+  import { isAuthenticated } from './lib/auth.js';
   import LoginForm from './components/LoginForm.svelte';
   import Videos from './pages/Videos.svelte';
   import Jobs from './pages/Jobs.svelte';
 
-  let loggedIn = $state(getCredentials());
+  let loggedIn = $state(isAuthenticated());
   let currentPage = $state('videos');
 
   function handleLogin() {

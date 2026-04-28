@@ -38,7 +38,7 @@
     }
   }
 
-  function onUploaded(_videoId) {
+  function onUploaded() {
     load();
   }
 

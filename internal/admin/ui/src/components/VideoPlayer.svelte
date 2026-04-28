@@ -13,8 +13,8 @@
 
   function buildPlaylistURL(profile) {
     const base = api.getPlaylistURL(video.public_id, profile);
-    // Append auth token as query param isn't needed for admin — we use
-    // Authorization header, but HLS XHR loader will handle it below.
+    // No query-param token needed — the HLS XHR loader injects the
+    // Authorization header directly (see xhrSetup below).
     return base;
   }
 
