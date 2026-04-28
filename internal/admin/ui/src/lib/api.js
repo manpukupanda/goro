@@ -79,8 +79,26 @@ export const api = {
   getPlaylistURL(id, profile) {
     return `${BASE}/videos/${id}/playlist?profile=${encodeURIComponent(profile)}`;
   },
-  getDownloadURL(id) {
-    return `${BASE}/videos/${id}/download`;
+  async downloadVideo(id) {
+    const headers = { ...authHeader() };
+    const res = await fetch(`${BASE}/videos/${id}/download`, { headers });
+    if (res.status === 401) {
+      clearCredentials();
+      location.reload();
+      throw new Error('Unauthorized');
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    const blob = await res.blob();
+    let filename = `video-${id}.mp4`;
+    const cd = res.headers.get('content-disposition');
+    if (cd) {
+      const m = cd.match(/filename="([^"]+)"/);
+      if (m) filename = m[1];
+    }
+    return { blob, filename };
   },
 
   // Jobs
