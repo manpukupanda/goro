@@ -56,6 +56,7 @@ func (s *Server) Router() *gin.Engine {
 	r.PUT("/videos/:id/visibility", s.setVisibility)
 	r.POST("/videos/:id/tokens", s.issueToken)
 	r.DELETE("/videos/:id", s.deleteVideo)
+	r.GET("/videos/:id/download", s.downloadVideo)
 
 	return r
 }
@@ -353,6 +354,39 @@ func rewritePlaylist(r io.Reader, videoID, profile string, expires int64, secret
 func computeSecureLinkMD5(expires int64, uri, secret string) string {
 	h := md5.Sum([]byte(fmt.Sprintf("%d%s%s", expires, uri, secret))) //nolint:gosec
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// downloadVideo streams the original MP4 file from storage.
+func (s *Server) downloadVideo(c *gin.Context) {
+	publicID := c.Param("id")
+
+	var originalName string
+	err := s.db.QueryRowContext(c.Request.Context(),
+		`SELECT original_name FROM videos WHERE public_id = ? AND status = 'ready'`, publicID).Scan(&originalName)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found or not ready"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		return
+	}
+
+	objectName := fmt.Sprintf("videos/%s/original.mp4", publicID)
+	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "original file not found"})
+		return
+	}
+	defer rc.Close()
+
+	c.Header("Content-Type", "video/mp4")
+	c.Header("Content-Length", strconv.FormatInt(size, 10))
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, originalName))
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, rc); err != nil {
+		log.Printf("error streaming mp4 %s: %v", objectName, err)
+	}
 }
 
 // getSegment streams a single .ts segment from MinIO.  nginx performs the

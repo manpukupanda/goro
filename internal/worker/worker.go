@@ -61,6 +61,12 @@ func processJob(ctx context.Context, s uploader, job *queue.Job, hlsConfig confi
 		}
 	}
 
+	// Upload the original MP4 so it can be downloaded later.
+	objectName := fmt.Sprintf("videos/%s/original.mp4", job.PublicID)
+	if err := s.UploadFile(ctx, objectName, job.InputMP4, "video/mp4"); err != nil {
+		return fmt.Errorf("failed to upload original mp4: %w", err)
+	}
+
 	_ = os.RemoveAll(filepath.Dir(job.InputMP4))
 	return nil
 }
