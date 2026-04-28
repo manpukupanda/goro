@@ -341,77 +341,16 @@ func TestSetVisibilityNotFound(t *testing.T) {
 	}
 }
 
-func TestAddAndRemovePermission(t *testing.T) {
-	database := openTestDB(t)
-	srv := newTestServer(t, database)
-	router := srv.Router()
-	videoID := uploadTestVideo(t, router)
-
-	// Add permission
-	body := strings.NewReader(`{"user_id":42}`)
-	req := httptest.NewRequest(http.MethodPost, "/videos/"+videoID+"/permissions", body)
-	req.Header.Set("Content-Type", "application/json")
-	res := httptest.NewRecorder()
-	router.ServeHTTP(res, req)
-	if res.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", res.Code, res.Body.String())
-	}
-
-	// Adding duplicate should be idempotent
-	body = strings.NewReader(`{"user_id":42}`)
-	req = httptest.NewRequest(http.MethodPost, "/videos/"+videoID+"/permissions", body)
-	req.Header.Set("Content-Type", "application/json")
-	res = httptest.NewRecorder()
-	router.ServeHTTP(res, req)
-	if res.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 on duplicate, got %d", res.Code)
-	}
-
-	// Remove permission
-	req = httptest.NewRequest(http.MethodDelete, "/videos/"+videoID+"/permissions/42", nil)
-	res = httptest.NewRecorder()
-	router.ServeHTTP(res, req)
-	if res.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 on delete, got %d: %s", res.Code, res.Body.String())
-	}
-}
-
-func TestAddPermissionVideoNotFound(t *testing.T) {
-	database := openTestDB(t)
-	srv := newTestServer(t, database)
-	router := srv.Router()
-
-	body := strings.NewReader(`{"user_id":1}`)
-	req := httptest.NewRequest(http.MethodPost, "/videos/nonexistent/permissions", body)
-	req.Header.Set("Content-Type", "application/json")
-	res := httptest.NewRecorder()
-	router.ServeHTTP(res, req)
-	if res.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", res.Code)
-	}
-}
-
 func TestIssueToken(t *testing.T) {
 	database := openTestDB(t)
 	srv := newTestServer(t, database)
 	router := srv.Router()
 	videoID := uploadTestVideo(t, router)
 
-	// Grant permission first
-	body := strings.NewReader(`{"user_id":7}`)
-	req := httptest.NewRequest(http.MethodPost, "/videos/"+videoID+"/permissions", body)
+	// Issue token without needing prior permission grant
+	req := httptest.NewRequest(http.MethodPost, "/videos/"+videoID+"/tokens", nil)
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
-	router.ServeHTTP(res, req)
-	if res.Code != http.StatusNoContent {
-		t.Fatalf("add permission: %d", res.Code)
-	}
-
-	// Issue token
-	body = strings.NewReader(`{"user_id":7}`)
-	req = httptest.NewRequest(http.MethodPost, "/videos/"+videoID+"/tokens", body)
-	req.Header.Set("Content-Type", "application/json")
-	res = httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", res.Code, res.Body.String())
@@ -428,22 +367,6 @@ func TestIssueToken(t *testing.T) {
 	}
 	if resp.ExpiresAt == "" {
 		t.Fatal("expected non-empty expires_at")
-	}
-}
-
-func TestIssueTokenForbiddenWithoutPermission(t *testing.T) {
-	database := openTestDB(t)
-	srv := newTestServer(t, database)
-	router := srv.Router()
-	videoID := uploadTestVideo(t, router)
-
-	body := strings.NewReader(`{"user_id":99}`)
-	req := httptest.NewRequest(http.MethodPost, "/videos/"+videoID+"/tokens", body)
-	req.Header.Set("Content-Type", "application/json")
-	res := httptest.NewRecorder()
-	router.ServeHTTP(res, req)
-	if res.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d", res.Code)
 	}
 }
 
@@ -474,12 +397,9 @@ func TestGetPlaylistPrivateWithValidToken(t *testing.T) {
 	var internalID int64
 	_ = database.QueryRow(`SELECT id FROM videos WHERE public_id = ?`, videoID).Scan(&internalID)
 
-	// Grant permission for user 5
-	_, _ = database.Exec(`INSERT INTO video_permissions (video_id, user_id) VALUES (?, 5)`, internalID)
-
 	// Insert a valid token
 	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-	_, _ = database.Exec(`INSERT INTO playlist_tokens (token, video_id, user_id, expires_at) VALUES ('validtoken123', ?, 5, ?)`, internalID, expiresAt)
+	_, _ = database.Exec(`INSERT INTO playlist_tokens (token, video_id, expires_at) VALUES ('validtoken123', ?, ?)`, internalID, expiresAt)
 
 	// Request with valid token
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile+"&token=validtoken123", nil)
@@ -527,11 +447,10 @@ func TestGetPlaylistPrivateWithExpiredToken(t *testing.T) {
 		videoID)
 	var internalID int64
 	_ = database.QueryRow(`SELECT id FROM videos WHERE public_id = ?`, videoID).Scan(&internalID)
-	_, _ = database.Exec(`INSERT INTO video_permissions (video_id, user_id) VALUES (?, 5)`, internalID)
 
 	// Expired token
 	expiredAt := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	_, _ = database.Exec(`INSERT INTO playlist_tokens (token, video_id, user_id, expires_at) VALUES ('expiredtok', ?, 5, ?)`, internalID, expiredAt)
+	_, _ = database.Exec(`INSERT INTO playlist_tokens (token, video_id, expires_at) VALUES ('expiredtok', ?, ?)`, internalID, expiredAt)
 
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile+"&token=expiredtok", nil)
 	res := httptest.NewRecorder()
