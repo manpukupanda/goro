@@ -14,10 +14,10 @@ server {
         if ($secure_link = "") { return 403; }
         if ($secure_link = "0") { return 410; }
 
-        proxy_pass http://goro:8080;
+        proxy_pass http://goro:5600;
     }
 
     location / {
-        proxy_pass http://goro:8080;
+        proxy_pass http://goro:5600;
     }
 }
