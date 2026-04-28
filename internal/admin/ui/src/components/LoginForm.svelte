@@ -20,7 +20,7 @@
 
 <div class="login-wrap">
   <form class="login-box" onsubmit={handleSubmit}>
-    <h1>goro Admin Console</h1>
+    <h1>Goro Console</h1>
     {#if error}
       <p class="error">{error}</p>
     {/if}
