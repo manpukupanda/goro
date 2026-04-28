@@ -11,6 +11,7 @@
   let playingVideo = $state(null);
   let togglingId = $state(null);
   let deletingId = $state(null);
+  let downloadingId = $state(null);
 
   async function load() {
     loading = true;
@@ -49,6 +50,25 @@
       error = err.message;
     } finally {
       deletingId = null;
+    }
+  }
+
+  async function downloadVideo(video) {
+    downloadingId = video.public_id;
+    try {
+      const { blob, filename } = await api.downloadVideo(video.public_id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      error = err.message;
+    } finally {
+      downloadingId = null;
     }
   }
 
@@ -117,15 +137,11 @@
                   disabled={deletingId === v.public_id}
                   onclick={() => deleteVideo(v)}
                 >Delete</button>
-                <a
+                <button
                   class="btn-small btn-download"
-                  href={api.getDownloadURL(v.public_id)}
-                  download
-                  role="button"
-                  aria-disabled={v.status !== 'ready'}
-                  class:disabled={v.status !== 'ready'}
-                  onclick={(e) => { if (v.status !== 'ready') e.preventDefault(); }}
-                >Download</a>
+                  disabled={v.status !== 'ready' || downloadingId === v.public_id}
+                  onclick={() => downloadVideo(v)}
+                >{downloadingId === v.public_id ? 'Downloading…' : 'Download'}</button>
               </td>
             </tr>
           {/each}
@@ -172,9 +188,8 @@
   .btn-toggle { color: #374151; }
   .btn-delete { color: #dc2626; border-color: #fca5a5; }
   .btn-delete:hover:not(:disabled) { background: #fee2e2; }
-  .btn-download { color: #2563eb; border-color: #93c5fd; text-decoration: none; display: inline-flex; align-items: center; }
-  .btn-download:hover:not(.disabled) { background: #eff6ff; }
-  .btn-download.disabled { opacity: .4; cursor: not-allowed; }
+  .btn-download { color: #2563eb; border-color: #93c5fd; }
+  .btn-download:hover:not(:disabled) { background: #eff6ff; }
   .error { color: #dc2626; font-size: .875rem; }
   .muted { color: #9ca3af; }
 </style>
