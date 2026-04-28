@@ -10,7 +10,7 @@
   async function handleSubmit(e) {
     e.preventDefault();
     if (!username || !password) {
-      error = 'ユーザ名とパスワードを入力してください';
+      error = 'Please enter your username and password.';
       return;
     }
     setCredentials(username, password);
@@ -20,19 +20,19 @@
 
 <div class="login-wrap">
   <form class="login-box" onsubmit={handleSubmit}>
-    <h1>goro 管理コンソール</h1>
+    <h1>goro Admin Console</h1>
     {#if error}
       <p class="error">{error}</p>
     {/if}
     <label>
-      ユーザ名
+      Username
       <input type="text" bind:value={username} autocomplete="username" required />
     </label>
     <label>
-      パスワード
+      Password
       <input type="password" bind:value={password} autocomplete="current-password" required />
     </label>
-    <button type="submit">ログイン</button>
+    <button type="submit">Login</button>
   </form>
 </div>
 

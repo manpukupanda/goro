@@ -14,8 +14,8 @@
   }
 
   async function handleUpload() {
-    if (!file) { error = 'ファイルを選択してください'; return; }
-    if (!file.name.toLowerCase().endsWith('.mp4')) { error = '.mp4 ファイルのみアップロードできます'; return; }
+    if (!file) { error = 'Please select a file.'; return; }
+    if (!file.name.toLowerCase().endsWith('.mp4')) { error = 'Only .mp4 files are supported.'; return; }
     uploading = true;
     error = '';
     try {
@@ -34,7 +34,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div class="overlay" onclick={(e) => { if (e.target === e.currentTarget && !uploading) onClose(); }}>
   <div class="modal">
-    <h2>動画アップロード</h2>
+    <h2>Upload Video</h2>
     {#if error}
       <p class="error">{error}</p>
     {/if}
@@ -43,18 +43,18 @@
       {#if file}
         <span>{file.name} ({(file.size / 1024 / 1024).toFixed(1)} MB)</span>
       {:else}
-        <span>MP4 ファイルを選択...</span>
+        <span>Select an MP4 file...</span>
       {/if}
     </label>
     {#if uploading}
       <div class="progress-bar">
         <div class="progress-fill" style="width: {progress}%"></div>
       </div>
-      <p class="progress-text">{progress}% アップロード中...</p>
+      <p class="progress-text">{progress}% Uploading...</p>
     {/if}
     <div class="actions">
-      <button class="btn-secondary" onclick={onClose} disabled={uploading}>キャンセル</button>
-      <button class="btn-primary" onclick={handleUpload} disabled={uploading || !file}>アップロード</button>
+      <button class="btn-secondary" onclick={onClose} disabled={uploading}>Cancel</button>
+      <button class="btn-primary" onclick={handleUpload} disabled={uploading || !file}>Upload</button>
     </div>
   </div>
 </div>

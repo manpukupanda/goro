@@ -26,6 +26,7 @@ import (
 // storageGetter is the subset of the S3 client used by the API server.
 type storageGetter interface {
 	GetObject(ctx context.Context, objectName string) (io.ReadCloser, int64, error)
+	DeleteVideoObjects(ctx context.Context, publicID string) error
 }
 
 type Server struct {
@@ -54,6 +55,7 @@ func (s *Server) Router() *gin.Engine {
 	// Management endpoints
 	r.PUT("/videos/:id/visibility", s.setVisibility)
 	r.POST("/videos/:id/tokens", s.issueToken)
+	r.DELETE("/videos/:id", s.deleteVideo)
 
 	return r
 }
@@ -190,6 +192,62 @@ func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
 	}
 
 	return nil
+}
+
+// deleteVideo removes a video and all its associated data from the database and
+// storage.  It deletes playlist_tokens and jobs first to satisfy foreign-key
+// constraints, then deletes the videos row, and finally removes all objects
+// from storage under videos/{id}/.
+func (s *Server) deleteVideo(c *gin.Context) {
+	publicID := c.Param("id")
+
+	// Resolve the internal numeric ID and confirm the video exists.
+	var videoID int64
+	err := s.db.QueryRowContext(c.Request.Context(),
+		`SELECT id FROM videos WHERE public_id = ?`, publicID).Scan(&videoID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		return
+	}
+
+	// Delete dependent rows atomically.
+	tx, err := s.db.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to begin transaction"})
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(c.Request.Context(),
+		`DELETE FROM playlist_tokens WHERE video_id = ?`, videoID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete tokens"})
+		return
+	}
+	if _, err := tx.ExecContext(c.Request.Context(),
+		`DELETE FROM jobs WHERE video_id = ?`, videoID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete jobs"})
+		return
+	}
+	if _, err := tx.ExecContext(c.Request.Context(),
+		`DELETE FROM videos WHERE id = ?`, videoID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete video"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to commit transaction"})
+		return
+	}
+
+	// Best-effort storage cleanup — log but do not fail the request.
+	if err := s.storage.DeleteVideoObjects(c.Request.Context(), publicID); err != nil {
+		log.Printf("deleteVideo: failed to remove storage objects for %s: %v", publicID, err)
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // setVisibility updates the visibility of a video to either "public" or "private".

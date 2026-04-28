@@ -17,19 +17,19 @@
 {:else}
   <div class="layout">
     <nav class="sidebar">
-      <div class="logo">goro 管理</div>
+      <div class="logo">goro Admin</div>
       <ul>
         <li>
           <button
             class:active={currentPage === 'videos'}
             onclick={() => { currentPage = 'videos'; }}
-          >🎬 動画</button>
+          >🎬 Videos</button>
         </li>
         <li>
           <button
             class:active={currentPage === 'jobs'}
             onclick={() => { currentPage = 'jobs'; }}
-          >⚙️ ジョブ</button>
+          >⚙️ Jobs</button>
         </li>
       </ul>
     </nav>

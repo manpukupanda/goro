@@ -10,6 +10,7 @@
   let showUpload = $state(false);
   let playingVideo = $state(null);
   let togglingId = $state(null);
+  let deletingId = $state(null);
 
   async function load() {
     loading = true;
@@ -38,20 +39,33 @@
     }
   }
 
+  async function deleteVideo(video) {
+    if (!window.confirm(`Delete video "${video.original_name.replace(/"/g, '\\"')}"? This cannot be undone.`)) return;
+    deletingId = video.public_id;
+    try {
+      await api.deleteVideo(video.public_id);
+      videos = videos.filter(v => v.public_id !== video.public_id);
+    } catch (err) {
+      error = err.message;
+    } finally {
+      deletingId = null;
+    }
+  }
+
   function onUploaded() {
     load();
   }
 
   $effect(() => { load(); });
 
-  const statusLabel = { queued: 'キュー', processing: '処理中', ready: '完了', failed: '失敗' };
+  const statusLabel = { queued: 'Queued', processing: 'Processing', ready: 'Ready', failed: 'Failed' };
   const statusClass = { queued: 'badge-queued', processing: 'badge-processing', ready: 'badge-ready', failed: 'badge-failed' };
 </script>
 
 <div class="page">
   <div class="page-header">
-    <h2>動画一覧</h2>
-    <button class="btn-primary" onclick={() => { showUpload = true; }}>＋ アップロード</button>
+    <h2>Videos</h2>
+    <button class="btn-primary" onclick={() => { showUpload = true; }}>＋ Upload</button>
   </div>
 
   {#if error}
@@ -59,20 +73,20 @@
   {/if}
 
   {#if loading}
-    <p class="muted">読み込み中...</p>
+    <p class="muted">Loading...</p>
   {:else if videos.length === 0}
-    <p class="muted">動画がありません</p>
+    <p class="muted">No videos found.</p>
   {:else}
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>ID</th>
-            <th>ファイル名</th>
-            <th>ステータス</th>
-            <th>公開設定</th>
-            <th>登録日時</th>
-            <th>操作</th>
+            <th>File Name</th>
+            <th>Status</th>
+            <th>Visibility</th>
+            <th>Created At</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -83,7 +97,7 @@
               <td><span class="badge {statusClass[v.status] ?? ''}">{statusLabel[v.status] ?? v.status}</span></td>
               <td>
                 <span class="badge {v.visibility === 'public' ? 'badge-public' : 'badge-private'}">
-                  {v.visibility === 'public' ? '公開' : '非公開'}
+                  {v.visibility === 'public' ? 'Public' : 'Private'}
                 </span>
               </td>
               <td class="mono">{v.created_at ?? ''}</td>
@@ -92,12 +106,17 @@
                   class="btn-small"
                   disabled={v.status !== 'ready'}
                   onclick={() => { playingVideo = v; }}
-                >再生</button>
+                >Play</button>
                 <button
                   class="btn-small btn-toggle"
                   disabled={togglingId === v.public_id}
                   onclick={() => toggleVisibility(v)}
-                >{v.visibility === 'public' ? '非公開にする' : '公開にする'}</button>
+                >{v.visibility === 'public' ? 'Make Private' : 'Make Public'}</button>
+                <button
+                  class="btn-small btn-delete"
+                  disabled={deletingId === v.public_id}
+                  onclick={() => deleteVideo(v)}
+                >Delete</button>
               </td>
             </tr>
           {/each}
@@ -142,6 +161,8 @@
   .btn-small:hover:not(:disabled) { background: #f3f4f6; }
   .btn-small:disabled { opacity: .4; cursor: not-allowed; }
   .btn-toggle { color: #374151; }
+  .btn-delete { color: #dc2626; border-color: #fca5a5; }
+  .btn-delete:hover:not(:disabled) { background: #fee2e2; }
   .error { color: #dc2626; font-size: .875rem; }
   .muted { color: #9ca3af; }
 </style>

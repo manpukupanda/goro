@@ -35,6 +35,10 @@ func (s *stubStorage) GetObject(_ context.Context, objectName string) (io.ReadCl
 	return io.NopCloser(bytes.NewReader(b)), int64(len(b)), nil
 }
 
+func (s *stubStorage) DeleteVideoObjects(_ context.Context, _ string) error {
+	return nil
+}
+
 func newTestServer(t *testing.T, database *sql.DB) *Server {
 	t.Helper()
 	q := queue.New(database)
