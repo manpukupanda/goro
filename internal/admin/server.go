@@ -91,19 +91,26 @@ func (s *Server) Router() *gin.Engine {
 	r.GET("/admin", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/admin/")
 	})
-	r.GET("/admin/*path", func(c *gin.Context) {
-		path := c.Param("path")
 
-		// Determine the file path relative to dist root.
-		// Strip leading "/" produced by the wildcard param.
-		relPath := strings.TrimPrefix(path, "/")
+	// Gin does not allow registering a catch-all wildcard ("/admin/*path") on
+	// the same router that already has named path segments under "/admin/api/".
+	// Use NoRoute instead: unmatched requests that start with /admin/ are served
+	// as static SPA assets (or fall back to index.html for client-side routing).
+	r.NoRoute(func(c *gin.Context) {
+		reqPath := c.Request.URL.Path
+		if !strings.HasPrefix(reqPath, "/admin/") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		// Resolve the path relative to the embedded dist root.
+		relPath := strings.TrimPrefix(reqPath, "/admin/")
 		if relPath == "" {
 			relPath = "index.html"
 		}
 
-		// If the file exists in the embedded FS, serve it directly.
+		// Serve the asset if it exists in the embedded FS.
 		if _, err := sub.Open(relPath); err == nil {
-			// Rewrite the request path so http.FileServer sees the correct path.
 			c.Request.URL.Path = "/" + relPath
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			return
