@@ -86,8 +86,6 @@ func (s *Server) Router() *gin.Engine {
 	if err != nil {
 		log.Fatalf("admin: failed to sub ui/dist: %v", err)
 	}
-	fileServer := http.FileServer(http.FS(sub))
-
 	// Gin does not allow registering a catch-all wildcard ("/admin/*path") on
 	// the same router that already has named path segments under "/admin/api/".
 	// Use NoRoute instead: unmatched requests that start with /admin or /admin/
@@ -112,15 +110,37 @@ func (s *Server) Router() *gin.Engine {
 		}
 
 		// Serve the asset if it exists in the embedded FS.
-		if _, err := sub.Open(relPath); err == nil {
-			c.Request.URL.Path = "/" + relPath
-			fileServer.ServeHTTP(c.Writer, c.Request)
+		// index.html is served directly to avoid http.FileServer's built-in
+		// behaviour of redirecting "<dir>/index.html" requests to "<dir>/".
+		serveFile := func(path string) {
+			data, err := fs.ReadFile(sub, path)
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+			mime := "text/html; charset=utf-8"
+			if strings.HasSuffix(path, ".js") {
+				mime = "application/javascript"
+			} else if strings.HasSuffix(path, ".css") {
+				mime = "text/css"
+			} else if strings.HasSuffix(path, ".svg") {
+				mime = "image/svg+xml"
+			} else if strings.HasSuffix(path, ".png") {
+				mime = "image/png"
+			} else if strings.HasSuffix(path, ".ico") {
+				mime = "image/x-icon"
+			}
+			c.Data(http.StatusOK, mime, data)
+		}
+
+		if f, err := sub.Open(relPath); err == nil {
+			f.Close()
+			serveFile(relPath)
 			return
 		}
 
 		// Fall back to index.html for SPA client-side routing.
-		c.Request.URL.Path = "/index.html"
-		fileServer.ServeHTTP(c.Writer, c.Request)
+		serveFile("index.html")
 	})
 
 	return r
