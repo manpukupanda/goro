@@ -4,7 +4,7 @@
   import Videos from './pages/Videos.svelte';
   import Jobs from './pages/Jobs.svelte';
 
-  let loggedIn = $state(!!getCredentials());
+  let loggedIn = $state(getCredentials());
   let currentPage = $state('videos');
 
   function handleLogin() {
@@ -66,4 +66,3 @@
   li button.active { background: rgba(255,255,255,.12); color: white; font-weight: 600; }
   .content { flex: 1; overflow-y: auto; }
 </style>
-

@@ -1,18 +1,14 @@
-// Stores Basic Auth credentials in sessionStorage.
+// Stores the pre-computed Basic Auth token (base64url of "user:pass") in
+// sessionStorage. The raw password is never stored.
 const KEY = 'goro_admin_auth';
 
 export function getCredentials() {
-  const raw = sessionStorage.getItem(KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return sessionStorage.getItem(KEY) !== null;
 }
 
 export function setCredentials(username, password) {
-  sessionStorage.setItem(KEY, JSON.stringify({ username, password }));
+  const token = btoa(`${username}:${password}`);
+  sessionStorage.setItem(KEY, token);
 }
 
 export function clearCredentials() {
@@ -20,8 +16,7 @@ export function clearCredentials() {
 }
 
 export function authHeader() {
-  const creds = getCredentials();
-  if (!creds) return {};
-  const encoded = btoa(`${creds.username}:${creds.password}`);
-  return { Authorization: `Basic ${encoded}` };
+  const token = sessionStorage.getItem(KEY);
+  if (!token) return {};
+  return { Authorization: `Basic ${token}` };
 }
