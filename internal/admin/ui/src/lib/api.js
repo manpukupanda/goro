@@ -79,6 +79,9 @@ export const api = {
   getPlaylistURL(id, profile) {
     return `${BASE}/videos/${id}/playlist?profile=${encodeURIComponent(profile)}`;
   },
+  getDownloadURL(id) {
+    return `${BASE}/videos/${id}/download`;
+  },
 
   // Jobs
   listJobs() {

@@ -117,6 +117,15 @@
                   disabled={deletingId === v.public_id}
                   onclick={() => deleteVideo(v)}
                 >Delete</button>
+                <a
+                  class="btn-small btn-download"
+                  href={api.getDownloadURL(v.public_id)}
+                  download
+                  role="button"
+                  aria-disabled={v.status !== 'ready'}
+                  class:disabled={v.status !== 'ready'}
+                  onclick={(e) => { if (v.status !== 'ready') e.preventDefault(); }}
+                >Download</a>
               </td>
             </tr>
           {/each}
@@ -163,6 +172,9 @@
   .btn-toggle { color: #374151; }
   .btn-delete { color: #dc2626; border-color: #fca5a5; }
   .btn-delete:hover:not(:disabled) { background: #fee2e2; }
+  .btn-download { color: #2563eb; border-color: #93c5fd; text-decoration: none; display: inline-flex; align-items: center; }
+  .btn-download:hover:not(.disabled) { background: #eff6ff; }
+  .btn-download.disabled { opacity: .4; cursor: not-allowed; }
   .error { color: #dc2626; font-size: .875rem; }
   .muted { color: #9ca3af; }
 </style>

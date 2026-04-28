@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"goro/internal/config"
@@ -78,6 +79,7 @@ func (s *Server) Router() *gin.Engine {
 		api.PUT("/videos/:id/visibility", s.setVisibility)
 		api.DELETE("/videos/:id", s.deleteVideo)
 		api.GET("/videos/:id/playlist", s.getPlaylist)
+		api.GET("/videos/:id/download", s.downloadVideo)
 		api.GET("/hls/:id/:profile/:segment", s.getSegment)
 		api.GET("/jobs", s.listJobs)
 		api.GET("/config", s.getConfig)
@@ -339,6 +341,39 @@ func (s *Server) getPlaylist(c *gin.Context) {
 	c.String(http.StatusOK, out)
 }
 
+// downloadVideo streams the original MP4 file from storage.
+func (s *Server) downloadVideo(c *gin.Context) {
+	publicID := c.Param("id")
+
+	var originalName string
+	err := s.db.QueryRowContext(c.Request.Context(),
+		`SELECT original_name FROM videos WHERE public_id = ? AND status = 'ready'`, publicID).Scan(&originalName)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found or not ready"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		return
+	}
+
+	objectName := fmt.Sprintf("videos/%s/original.mp4", publicID)
+	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "original file not found"})
+		return
+	}
+	defer rc.Close()
+
+	c.Header("Content-Type", "video/mp4")
+	c.Header("Content-Length", strconv.FormatInt(size, 10))
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, originalName))
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, rc); err != nil {
+		log.Printf("admin: error streaming mp4 %s: %v", objectName, err)
+	}
+}
+
 // getSegment streams a single .ts HLS segment directly from storage.
 // This is used by the admin player which cannot access the nginx secure-link URLs.
 func (s *Server) getSegment(c *gin.Context) {
@@ -355,7 +390,7 @@ func (s *Server) getSegment(c *gin.Context) {
 	defer rc.Close()
 
 	c.Header("Content-Type", "video/mp2t")
-	c.Header("Content-Length", fmt.Sprintf("%d", size))
+	c.Header("Content-Length", strconv.FormatInt(size, 10))
 	c.Status(http.StatusOK)
 	if _, err := io.Copy(c.Writer, rc); err != nil {
 		log.Printf("admin: error streaming segment %s: %v", objectName, err)
