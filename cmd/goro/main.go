@@ -1,9 +1,12 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"os"
 
+	"goro/internal/admin"
 	"goro/internal/api"
 	"goro/internal/config"
 	"goro/internal/db"
@@ -13,6 +16,11 @@ import (
 )
 
 func main() {
+	apiPort := flag.Int("api-port", 5600, "Port for the public API server")
+	consolePort := flag.Int("console-port", 5601, "Port for the admin console server")
+	enableConsole := flag.Bool("console", false, "Enable the admin management console")
+	flag.Parse()
+
 	cfgPath := os.Getenv("GORO_CONFIG")
 	if cfgPath == "" {
 		cfgPath = "configs/config.yaml"
@@ -41,6 +49,15 @@ func main() {
 		go worker.Start(q, s3, cfg.HLS)
 	}
 
+	if *enableConsole {
+		adminSrv, err := admin.NewServer(database, q, s3, cfg.HLS, cfg.SecureLink, cfg.PlaylistToken)
+		if err != nil {
+			log.Fatalf("failed to initialize admin console: %v", err)
+		}
+		go adminSrv.Start(fmt.Sprintf(":%d", *consolePort))
+	}
+
 	server := api.NewServer(database, q, s3, cfg.SecureLink, cfg.HLS, cfg.PlaylistToken)
-	server.Start(":8080")
+	server.Start(fmt.Sprintf(":%d", *apiPort))
 }
+

@@ -36,3 +36,6 @@ data/
 
 # air (hot reload)
 tmp/
+
+# Admin UI — node_modules excluded; dist is committed for go:embed
+internal/admin/ui/node_modules/
