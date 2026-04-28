@@ -1,6 +1,7 @@
 <script>
-  import { onDestroy } from 'svelte';
   import { authHeader } from '../lib/auth.js';
+
+  const BASE = '/admin/api';
 
   const { videoId, specName, className = '', alt = specName } = $props();
 
@@ -15,7 +16,7 @@
     loading = true;
     let objectUrl = null;
 
-    fetch(`/admin/api/videos/${_id}/thumbnails/${encodeURIComponent(_name)}`, {
+    fetch(`${BASE}/videos/${_id}/thumbnails/${encodeURIComponent(_name)}`, {
       headers: authHeader(),
     })
       .then((res) => (res.ok ? res.blob() : null))

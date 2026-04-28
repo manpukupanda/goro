@@ -176,9 +176,6 @@ func fixedSecondTimestamp(specSec, duration float64) float64 {
 		if sec >= duration && duration > 0 {
 			sec = duration / 2
 		}
-		if sec < 0 {
-			sec = 0
-		}
 		return sec
 	}
 	// Auto rule

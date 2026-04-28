@@ -43,12 +43,12 @@ func TestFixedSecondTimestamp_AutoRule(t *testing.T) {
 		duration float64
 		wantSec  float64
 	}{
-		{0, 10.0, 5.0},   // long video → 5 s mark
-		{0, 4.0, 2.0},    // short video → duration/2
-		{0, 5.0, 5.0},    // exactly 5 s → 5 s mark
-		{0, 0.5, 0.25},   // very short
-		{3.0, 10.0, 3.0}, // explicit value within duration
-		{8.0, 10.0, 8.0}, // explicit value within duration
+		{0, 10.0, 5.0},    // long video → 5 sec mark
+		{0, 4.0, 2.0},     // short video → duration/2
+		{0, 5.0, 5.0},     // exactly 5 sec → 5 sec mark
+		{0, 0.5, 0.25},    // very short
+		{3.0, 10.0, 3.0},  // explicit value within duration
+		{8.0, 10.0, 8.0},  // explicit value within duration
 		{12.0, 10.0, 5.0}, // explicit value exceeds duration → duration/2
 	}
 
@@ -66,11 +66,11 @@ func TestThumbnailFilterFrames(t *testing.T) {
 		duration float64
 		want     int
 	}{
-		{60.0, 100},  // long video → default 100
-		{3.0, 90},    // 3 s × 30 fps = 90 → use 90
-		{1.0, 30},    // 1 s × 30 fps = 30 → use 30
-		{0.1, 3},     // ceil(0.1*30) = 3
-		{0.0, 100},   // zero duration → default 100 (ceil(0) = 0 < 1, fallback)
+		{60.0, 100}, // long video → default 100
+		{3.0, 90},   // 3 sec × 30 fps = 90 → use 90
+		{1.0, 30},   // 1 sec × 30 fps = 30 → use 30
+		{0.1, 3},    // ceil(0.1*30) = 3
+		{0.0, 100},  // zero duration → default 100 (ceil(0) = 0 < 1, fallback)
 	}
 
 	for _, tc := range cases {
