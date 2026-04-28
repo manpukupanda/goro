@@ -88,24 +88,26 @@ func (s *Server) Router() *gin.Engine {
 	}
 	fileServer := http.FileServer(http.FS(sub))
 
-	r.GET("/admin", func(c *gin.Context) {
-		c.Redirect(http.StatusMovedPermanently, "/admin/")
-	})
-
 	// Gin does not allow registering a catch-all wildcard ("/admin/*path") on
 	// the same router that already has named path segments under "/admin/api/".
-	// Use NoRoute instead: unmatched requests that start with /admin/ are served
-	// as static SPA assets (or fall back to index.html for client-side routing).
+	// Use NoRoute instead: unmatched requests that start with /admin or /admin/
+	// are served as static SPA assets (or fall back to index.html for
+	// client-side routing).
+	// NOTE: Do NOT register r.GET("/admin", ...) here. Gin's default
+	// RedirectTrailingSlash behaviour would redirect /admin/ → /admin because
+	// that route exists, which would loop with any explicit /admin → /admin/
+	// redirect we add ourselves.
 	r.NoRoute(func(c *gin.Context) {
 		reqPath := c.Request.URL.Path
-		if !strings.HasPrefix(reqPath, "/admin/") {
+		if reqPath != "/admin" && !strings.HasPrefix(reqPath, "/admin/") {
 			c.Status(http.StatusNotFound)
 			return
 		}
 
 		// Resolve the path relative to the embedded dist root.
+		// Both "/admin" and "/admin/" map to the SPA entry point.
 		relPath := strings.TrimPrefix(reqPath, "/admin/")
-		if relPath == "" {
+		if relPath == "" || relPath == "/admin" {
 			relPath = "index.html"
 		}
 
