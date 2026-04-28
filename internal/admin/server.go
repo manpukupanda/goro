@@ -244,19 +244,30 @@ func (s *Server) deleteVideo(c *gin.Context) {
 		return
 	}
 
-	if _, err := s.db.ExecContext(c.Request.Context(),
+	tx, err := s.db.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to begin transaction"})
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM playlist_tokens WHERE video_id = ?`, videoID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete tokens"})
 		return
 	}
-	if _, err := s.db.ExecContext(c.Request.Context(),
+	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM jobs WHERE video_id = ?`, videoID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete jobs"})
 		return
 	}
-	if _, err := s.db.ExecContext(c.Request.Context(),
+	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM videos WHERE id = ?`, videoID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete video"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to commit transaction"})
 		return
 	}
 

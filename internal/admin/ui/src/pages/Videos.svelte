@@ -40,7 +40,7 @@
   }
 
   async function deleteVideo(video) {
-    if (!window.confirm(`Delete video "${video.original_name}"? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete video "${video.original_name.replace(/"/g, '\\"')}"? This cannot be undone.`)) return;
     deletingId = video.public_id;
     try {
       await api.deleteVideo(video.public_id);
