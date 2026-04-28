@@ -20,14 +20,14 @@
 
   $effect(() => { load(); });
 
-  const statusLabel = { pending: '待機中', processing: '処理中', done: '完了', failed: '失敗' };
+  const statusLabel = { pending: 'Pending', processing: 'Processing', done: 'Done', failed: 'Failed' };
   const statusClass = { pending: 'badge-queued', processing: 'badge-processing', done: 'badge-ready', failed: 'badge-failed' };
 </script>
 
 <div class="page">
   <div class="page-header">
-    <h2>ジョブ一覧</h2>
-    <button class="btn-secondary" onclick={load}>更新</button>
+    <h2>Jobs</h2>
+    <button class="btn-secondary" onclick={load}>Refresh</button>
   </div>
 
   {#if error}
@@ -35,20 +35,20 @@
   {/if}
 
   {#if loading}
-    <p class="muted">読み込み中...</p>
+    <p class="muted">Loading...</p>
   {:else if jobs.length === 0}
-    <p class="muted">ジョブがありません</p>
+    <p class="muted">No jobs found.</p>
   {:else}
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>ジョブ ID</th>
-            <th>動画 ID</th>
-            <th>ステータス</th>
-            <th>作成日時</th>
-            <th>更新日時</th>
-            <th>エラー</th>
+            <th>Job ID</th>
+            <th>Video ID</th>
+            <th>Status</th>
+            <th>Created At</th>
+            <th>Updated At</th>
+            <th>Error</th>
           </tr>
         </thead>
         <tbody>

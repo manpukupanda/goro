@@ -62,3 +62,28 @@ func (s *S3) GetObject(ctx context.Context, objectName string) (io.ReadCloser, i
 	}
 	return obj, stat.Size, nil
 }
+
+// DeleteVideoObjects removes all objects stored under videos/{publicID}/ from
+// the bucket.  It lists objects with that prefix and deletes them in a single
+// batch call.  No error is returned when no objects are found.
+func (s *S3) DeleteVideoObjects(ctx context.Context, publicID string) error {
+	prefix := "videos/" + publicID + "/"
+
+	objectsCh := make(chan minio.ObjectInfo)
+	go func() {
+		defer close(objectsCh)
+		for obj := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+			if obj.Err != nil {
+				return
+			}
+			objectsCh <- obj
+		}
+	}()
+
+	for err := range s.client.RemoveObjects(ctx, s.bucket, objectsCh, minio.RemoveObjectsOptions{}) {
+		if err.Err != nil {
+			return err.Err
+		}
+	}
+	return nil
+}

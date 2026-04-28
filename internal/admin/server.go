@@ -25,6 +25,7 @@ var uiDist embed.FS
 // storageAccessor is the subset of S3 operations required by the admin server.
 type storageAccessor interface {
 	GetObject(ctx context.Context, objectName string) (io.ReadCloser, int64, error)
+	DeleteVideoObjects(ctx context.Context, publicID string) error
 }
 
 // Server is the admin console HTTP server.
@@ -75,6 +76,7 @@ func (s *Server) Router() *gin.Engine {
 		api.GET("/videos", s.listVideos)
 		api.POST("/videos", s.uploadVideo)
 		api.PUT("/videos/:id/visibility", s.setVisibility)
+		api.DELETE("/videos/:id", s.deleteVideo)
 		api.GET("/videos/:id/playlist", s.getPlaylist)
 		api.GET("/hls/:id/:profile/:segment", s.getSegment)
 		api.GET("/jobs", s.listJobs)
@@ -223,6 +225,46 @@ func (s *Server) uploadVideo(c *gin.Context) {
 
 	log.Printf("admin: queued video %s (%s)", publicID, file.Filename)
 	c.JSON(http.StatusAccepted, gin.H{"video_id": publicID})
+}
+
+// deleteVideo removes a video and all its associated data from the database and
+// storage.
+func (s *Server) deleteVideo(c *gin.Context) {
+	publicID := c.Param("id")
+
+	var videoID int64
+	err := s.db.QueryRowContext(c.Request.Context(),
+		`SELECT id FROM videos WHERE public_id = ?`, publicID).Scan(&videoID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		return
+	}
+
+	if _, err := s.db.ExecContext(c.Request.Context(),
+		`DELETE FROM playlist_tokens WHERE video_id = ?`, videoID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete tokens"})
+		return
+	}
+	if _, err := s.db.ExecContext(c.Request.Context(),
+		`DELETE FROM jobs WHERE video_id = ?`, videoID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete jobs"})
+		return
+	}
+	if _, err := s.db.ExecContext(c.Request.Context(),
+		`DELETE FROM videos WHERE id = ?`, videoID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete video"})
+		return
+	}
+
+	if err := s.storage.DeleteVideoObjects(c.Request.Context(), publicID); err != nil {
+		log.Printf("admin deleteVideo: failed to remove storage objects for %s: %v", publicID, err)
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // setVisibility updates the visibility of a video.

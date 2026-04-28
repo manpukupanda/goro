@@ -70,6 +70,9 @@ export const api = {
       xhr.send(fd);
     });
   },
+  deleteVideo(id) {
+    return request('DELETE', `/videos/${id}`);
+  },
   setVisibility(id, visibility) {
     return request('PUT', `/videos/${id}/visibility`, { visibility });
   },
