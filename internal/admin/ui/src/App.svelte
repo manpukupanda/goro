@@ -17,7 +17,7 @@
 {:else}
   <div class="layout">
     <nav class="sidebar">
-      <div class="logo">goro Admin</div>
+      <div class="logo">Goro Console</div>
       <ul>
         <li>
           <button
