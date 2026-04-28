@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"goro/internal/config"
@@ -365,7 +366,7 @@ func (s *Server) downloadVideo(c *gin.Context) {
 	defer rc.Close()
 
 	c.Header("Content-Type", "video/mp4")
-	c.Header("Content-Length", fmt.Sprintf("%d", size))
+	c.Header("Content-Length", strconv.FormatInt(size, 10))
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, originalName))
 	c.Status(http.StatusOK)
 	if _, err := io.Copy(c.Writer, rc); err != nil {
@@ -389,7 +390,7 @@ func (s *Server) getSegment(c *gin.Context) {
 	defer rc.Close()
 
 	c.Header("Content-Type", "video/mp2t")
-	c.Header("Content-Length", fmt.Sprintf("%d", size))
+	c.Header("Content-Length", strconv.FormatInt(size, 10))
 	c.Status(http.StatusOK)
 	if _, err := io.Copy(c.Writer, rc); err != nil {
 		log.Printf("admin: error streaming segment %s: %v", objectName, err)

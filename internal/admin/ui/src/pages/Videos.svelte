@@ -121,6 +121,8 @@
                   class="btn-small btn-download"
                   href={api.getDownloadURL(v.public_id)}
                   download
+                  role="button"
+                  aria-disabled={v.status !== 'ready'}
                   class:disabled={v.status !== 'ready'}
                   onclick={(e) => { if (v.status !== 'ready') e.preventDefault(); }}
                 >Download</a>
