@@ -23,11 +23,14 @@ func main() {
 	flag.Parse()
 
 	cfgPath := os.Getenv("GORO_CONFIG")
-	if cfgPath == "" {
-		cfgPath = "configs/config.yaml"
-	}
 
-	cfg, err := config.Load(cfgPath)
+	var cfg *config.Config
+	var err error
+	if cfgPath != "" {
+		cfg, err = config.Load(cfgPath)
+	} else {
+		cfg, err = config.LoadDefault()
+	}
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
@@ -63,7 +66,7 @@ func main() {
 		go adminSrv.Start(fmt.Sprintf(":%d", *consolePort))
 	}
 
-	server := api.NewServer(database, q, s3, cfg.SecureLink, cfg.HLS, cfg.PlaylistToken)
+	server := api.NewServer(database, q, s3, cfg.SecureLink, cfg.HLS, cfg.PlaylistToken, cfg.APIKey)
 	server.Start(fmt.Sprintf(":%d", *apiPort))
 }
 

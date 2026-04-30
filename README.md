@@ -24,7 +24,9 @@ Nginx → http://localhost/
 
 ## Configuration
 
-System-level settings are loaded from `configs/config.yaml`:
+System-level settings are embedded in the binary at build time (`internal/config/default_config.yaml`).
 
 - S3/MinIO connection settings
 - HLS profiles (e.g. 1080p / 720p / 480p)
+
+To override the defaults, point the `GORO_CONFIG` environment variable to a custom YAML file before starting the server.

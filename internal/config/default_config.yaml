@@ -1,7 +1,10 @@
 s3:
   endpoint: minio:9000
-  access_key: minio
-  secret_key: minio123
+  # access_key and secret_key must be supplied via GORO_S3_ACCESS_KEY and
+  # GORO_S3_SECRET_KEY environment variables (leave blank here to avoid
+  # storing secrets in the config file).
+  access_key: ""
+  secret_key: ""
   bucket: goro
   use_ssl: false
   region: us-east-1
