@@ -20,6 +20,8 @@ services:
       # Admin console credentials — change before production use.
       - GORO_ADMIN_USER=${GORO_ADMIN_USER:-admin}
       - GORO_ADMIN_PASSWORD=${GORO_ADMIN_PASSWORD:?GORO_ADMIN_PASSWORD must be set}
+      # Store the database inside the mounted data volume.
+      - GORO_DB_PATH=/app/data/goro.db
 
   nginx:
     image: nginx
