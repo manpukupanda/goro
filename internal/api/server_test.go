@@ -48,9 +48,8 @@ func newTestServer(t *testing.T, database *sql.DB) *Server {
 }
 
 // authRequest attaches the test API key to a request.
-func authRequest(req *http.Request) *http.Request {
+func authRequest(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+testAPIKey)
-	return req
 }
 
 func TestUploadVideoCreatesVideoAndJob(t *testing.T) {
