@@ -60,8 +60,10 @@ type WorkerConfig struct {
 }
 
 type S3Config struct {
-	Endpoint  string `yaml:"endpoint"`
+	Endpoint string `yaml:"endpoint"`
+	// AccessKey can be overridden at runtime with the GORO_S3_ACCESS_KEY environment variable.
 	AccessKey string `yaml:"access_key"`
+	// SecretKey can be overridden at runtime with the GORO_S3_SECRET_KEY environment variable.
 	SecretKey string `yaml:"secret_key"`
 	Bucket    string `yaml:"bucket"`
 	UseSSL    bool   `yaml:"use_ssl"`
@@ -100,6 +102,15 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) validateAndApplyDefaults() error {
+	// Allow S3 credentials to be supplied (or overridden) via environment variables
+	// so that the config file can remain free of secrets.
+	if v := os.Getenv("GORO_S3_ACCESS_KEY"); v != "" {
+		c.S3.AccessKey = v
+	}
+	if v := os.Getenv("GORO_S3_SECRET_KEY"); v != "" {
+		c.S3.SecretKey = v
+	}
+
 	if c.S3.Endpoint == "" || c.S3.AccessKey == "" || c.S3.SecretKey == "" || c.S3.Bucket == "" {
 		return fmt.Errorf("s3 config is incomplete")
 	}
