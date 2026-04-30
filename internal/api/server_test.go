@@ -39,10 +39,17 @@ func (s *stubStorage) DeleteVideoObjects(_ context.Context, _ string) error {
 	return nil
 }
 
+const testAPIKey = "test-api-key"
+
 func newTestServer(t *testing.T, database *sql.DB) *Server {
 	t.Helper()
 	q := queue.New(database)
-	return NewServer(database, q, nil, config.SecureLinkConfig{}, config.HLSConfig{}, config.PlaylistTokenConfig{TTLSec: 900})
+	return NewServer(database, q, nil, config.SecureLinkConfig{}, config.HLSConfig{}, config.PlaylistTokenConfig{TTLSec: 900}, testAPIKey)
+}
+
+// authRequest attaches the test API key to a request.
+func authRequest(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+testAPIKey)
 }
 
 func TestUploadVideoCreatesVideoAndJob(t *testing.T) {
@@ -64,6 +71,7 @@ func TestUploadVideoCreatesVideoAndJob(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/videos", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -127,6 +135,7 @@ func TestUploadVideoRejectsNonMP4(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/videos", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -150,7 +159,7 @@ func TestGetPlaylistRewritesSegmentURLs(t *testing.T) {
 	}
 	slCfg := config.SecureLinkConfig{Secret: secret, TTLSec: 3600}
 	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile}}}
-	srv := NewServer(nil, nil, store, slCfg, hlsCfg, config.PlaylistTokenConfig{})
+	srv := NewServer(nil, nil, store, slCfg, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile, nil)
@@ -181,7 +190,7 @@ func TestGetPlaylistUsesDefaultProfile(t *testing.T) {
 		},
 	}
 	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile}}}
-	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{})
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
 	router := srv.Router()
 
 	// No ?profile= query param — should fall back to hlsConfig.Profiles[0]
@@ -197,7 +206,7 @@ func TestGetPlaylistUsesDefaultProfile(t *testing.T) {
 func TestGetPlaylistNotFound(t *testing.T) {
 	store := &stubStorage{objects: map[string]string{}}
 	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: "720p"}}}
-	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{})
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/videos/missing/playlist?profile=720p", nil)
@@ -275,6 +284,7 @@ func uploadTestVideo(t *testing.T, router http.Handler) string {
 
 	req := httptest.NewRequest(http.MethodPost, "/videos", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusAccepted {
@@ -297,6 +307,7 @@ func TestSetVisibility(t *testing.T) {
 	body := strings.NewReader(`{"visibility":"private"}`)
 	req := httptest.NewRequest(http.MethodPut, "/videos/"+videoID+"/visibility", body)
 	req.Header.Set("Content-Type", "application/json")
+	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -307,6 +318,7 @@ func TestSetVisibility(t *testing.T) {
 	body = strings.NewReader(`{"visibility":"public"}`)
 	req = httptest.NewRequest(http.MethodPut, "/videos/"+videoID+"/visibility", body)
 	req.Header.Set("Content-Type", "application/json")
+	authRequest(req)
 	res = httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -323,6 +335,7 @@ func TestSetVisibilityInvalidValue(t *testing.T) {
 	body := strings.NewReader(`{"visibility":"hidden"}`)
 	req := httptest.NewRequest(http.MethodPut, "/videos/"+videoID+"/visibility", body)
 	req.Header.Set("Content-Type", "application/json")
+	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
@@ -338,6 +351,7 @@ func TestSetVisibilityNotFound(t *testing.T) {
 	body := strings.NewReader(`{"visibility":"private"}`)
 	req := httptest.NewRequest(http.MethodPut, "/videos/nonexistent/visibility", body)
 	req.Header.Set("Content-Type", "application/json")
+	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusNotFound {
@@ -354,6 +368,7 @@ func TestIssueToken(t *testing.T) {
 	// Issue token without needing prior permission grant
 	req := httptest.NewRequest(http.MethodPost, "/videos/"+videoID+"/tokens", nil)
 	req.Header.Set("Content-Type", "application/json")
+	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusCreated {
@@ -388,7 +403,7 @@ func TestGetPlaylistPrivateWithValidToken(t *testing.T) {
 	database := openTestDB(t)
 	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile}}}
 	tokenCfg := config.PlaylistTokenConfig{TTLSec: 900}
-	srv := NewServer(database, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, tokenCfg)
+	srv := NewServer(database, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, tokenCfg, testAPIKey)
 	router := srv.Router()
 
 	// Insert a video row directly with public_id=videoID and visibility=private
@@ -418,7 +433,7 @@ func TestGetPlaylistPrivateWithoutToken(t *testing.T) {
 	const videoID = "pvt2"
 	database := openTestDB(t)
 	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: "720p"}}}
-	srv := NewServer(database, nil, nil, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{TTLSec: 900})
+	srv := NewServer(database, nil, nil, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{TTLSec: 900}, testAPIKey)
 	router := srv.Router()
 
 	_, err := database.Exec(
@@ -443,7 +458,7 @@ func TestGetPlaylistPrivateWithExpiredToken(t *testing.T) {
 	)
 	database := openTestDB(t)
 	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile}}}
-	srv := NewServer(database, nil, nil, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{TTLSec: 900})
+	srv := NewServer(database, nil, nil, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{TTLSec: 900}, testAPIKey)
 	router := srv.Router()
 
 	_, _ = database.Exec(
@@ -482,6 +497,99 @@ func TestNewToken(t *testing.T) {
 	token2, _ := newToken(32)
 	if token == token2 {
 		t.Fatal("newToken is not random: two calls returned the same value")
+	}
+}
+
+// ---- API key middleware tests ----
+
+func TestHealthzNoAuthRequired(t *testing.T) {
+	database := openTestDB(t)
+	router := newTestServer(t, database).Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	// No Authorization header
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected /healthz to return 200 without auth, got %d", res.Code)
+	}
+}
+
+func TestPlaylistNoAuthRequired(t *testing.T) {
+	const (
+		videoID = "noauth1"
+		profile = "720p"
+	)
+	m3u8 := "#EXTM3U\n#EXT-X-ENDLIST\n"
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.m3u8", videoID, profile): m3u8,
+		},
+	}
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile}}}
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	// No Authorization header
+	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile, nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected /videos/:id/playlist to return 200 without auth, got %d", res.Code)
+	}
+}
+
+func TestSegmentNoAuthRequired(t *testing.T) {
+	const (
+		videoID = "noauth2"
+		profile = "720p"
+		segment = "segment000.ts"
+	)
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/%s", videoID, profile, segment): "ts-data",
+		},
+	}
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{}, config.HLSConfig{}, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	// No Authorization header
+	req := httptest.NewRequest(http.MethodGet, "/hls/videos/"+videoID+"/"+profile+"/"+segment, nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected /hls/videos/:id/:profile/:segment to return 200 without auth, got %d", res.Code)
+	}
+}
+
+func TestRequireAPIKeyRejects401(t *testing.T) {
+	database := openTestDB(t)
+	router := newTestServer(t, database).Router()
+
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{"no header", ""},
+		{"wrong key", "Bearer wrong-key"},
+		{"missing Bearer prefix", testAPIKey},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/videos", nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			if res.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d", res.Code)
+			}
+		})
 	}
 }
 

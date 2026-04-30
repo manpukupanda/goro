@@ -17,6 +17,9 @@ type Config struct {
 	Worker        WorkerConfig        `yaml:"worker"`
 	SecureLink    SecureLinkConfig    `yaml:"secure_link"`
 	PlaylistToken PlaylistTokenConfig `yaml:"playlist_token"`
+	// APIKey is the static API key required to access the public API.
+	// It must be supplied via the GORO_API_KEY environment variable.
+	APIKey string `yaml:"-"`
 }
 
 // ThumbnailConfig holds the list of thumbnail specs to generate after HLS encoding.
@@ -152,6 +155,12 @@ func (c *Config) validateAndApplyDefaults() error {
 
 	if c.PlaylistToken.TTLSec <= 0 {
 		c.PlaylistToken.TTLSec = defaultPlaylistTokenTTLSec
+	}
+
+	// GORO_API_KEY must be set; the server refuses to start without it.
+	c.APIKey = os.Getenv("GORO_API_KEY")
+	if c.APIKey == "" {
+		return fmt.Errorf("GORO_API_KEY environment variable must be set")
 	}
 
 	return nil

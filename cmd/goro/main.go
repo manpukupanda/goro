@@ -57,7 +57,7 @@ func main() {
 		go adminSrv.Start(fmt.Sprintf(":%d", *consolePort))
 	}
 
-	server := api.NewServer(database, q, s3, cfg.SecureLink, cfg.HLS, cfg.PlaylistToken)
+	server := api.NewServer(database, q, s3, cfg.SecureLink, cfg.HLS, cfg.PlaylistToken, cfg.APIKey)
 	server.Start(fmt.Sprintf(":%d", *apiPort))
 }
 

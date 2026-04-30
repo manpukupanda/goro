@@ -17,6 +17,8 @@ services:
       # Set SECURE_LINK_SECRET to a strong random value before starting.
       # The same value must be set on the nginx container below.
       - SECURE_LINK_SECRET=${SECURE_LINK_SECRET:?SECURE_LINK_SECRET must be set}
+      # API key required to access the public API endpoints.
+      - GORO_API_KEY=${GORO_API_KEY:?GORO_API_KEY must be set}
       # Admin console credentials — change before production use.
       - GORO_ADMIN_USER=${GORO_ADMIN_USER:-admin}
       - GORO_ADMIN_PASSWORD=${GORO_ADMIN_PASSWORD:?GORO_ADMIN_PASSWORD must be set}
