@@ -74,6 +74,9 @@ func main() {
 // The parent directory is created if it does not already exist.
 func resolveDBPath() (string, error) {
 	if p := os.Getenv("GORO_DB_PATH"); p != "" {
+		if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+			return "", fmt.Errorf("could not create data directory %s: %w", filepath.Dir(p), err)
+		}
 		return p, nil
 	}
 
