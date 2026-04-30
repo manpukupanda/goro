@@ -1,11 +1,15 @@
 package config
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed default_config.yaml
+var defaultConfigYAML []byte
 
 const defaultSecureLinkTTLSec = 3600
 const defaultPlaylistTokenTTLSec = 900
@@ -60,8 +64,10 @@ type WorkerConfig struct {
 }
 
 type S3Config struct {
-	Endpoint  string `yaml:"endpoint"`
+	Endpoint string `yaml:"endpoint"`
+	// AccessKey can be overridden at runtime with the GORO_S3_ACCESS_KEY environment variable.
 	AccessKey string `yaml:"access_key"`
+	// SecretKey can be overridden at runtime with the GORO_S3_SECRET_KEY environment variable.
 	SecretKey string `yaml:"secret_key"`
 	Bucket    string `yaml:"bucket"`
 	UseSSL    bool   `yaml:"use_ssl"`
@@ -82,13 +88,26 @@ type HLSProfile struct {
 }
 
 func Load(path string) (*Config, error) {
-	bytes, err := os.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	return LoadBytes(data)
+}
 
+// LoadDefault loads the configuration that was embedded into the binary at
+// build time. Environment variables are applied on top, so all sensitive
+// values (GORO_API_KEY, GORO_S3_ACCESS_KEY, etc.) can still be injected at
+// runtime.
+func LoadDefault() (*Config, error) {
+	return LoadBytes(defaultConfigYAML)
+}
+
+// LoadBytes parses YAML configuration from the supplied byte slice and applies
+// defaults and environment-variable overrides.
+func LoadBytes(data []byte) (*Config, error) {
 	var cfg Config
-	if err := yaml.Unmarshal(bytes, &cfg); err != nil {
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
 
@@ -100,6 +119,15 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) validateAndApplyDefaults() error {
+	// Allow S3 credentials to be supplied (or overridden) via environment variables
+	// so that the config file can remain free of secrets.
+	if v := os.Getenv("GORO_S3_ACCESS_KEY"); v != "" {
+		c.S3.AccessKey = v
+	}
+	if v := os.Getenv("GORO_S3_SECRET_KEY"); v != "" {
+		c.S3.SecretKey = v
+	}
+
 	if c.S3.Endpoint == "" || c.S3.AccessKey == "" || c.S3.SecretKey == "" || c.S3.Bucket == "" {
 		return fmt.Errorf("s3 config is incomplete")
 	}

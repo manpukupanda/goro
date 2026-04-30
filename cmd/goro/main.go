@@ -22,11 +22,14 @@ func main() {
 	flag.Parse()
 
 	cfgPath := os.Getenv("GORO_CONFIG")
-	if cfgPath == "" {
-		cfgPath = "configs/config.yaml"
-	}
 
-	cfg, err := config.Load(cfgPath)
+	var cfg *config.Config
+	var err error
+	if cfgPath != "" {
+		cfg, err = config.Load(cfgPath)
+	} else {
+		cfg, err = config.LoadDefault()
+	}
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}

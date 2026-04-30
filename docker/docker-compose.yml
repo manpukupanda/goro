@@ -14,6 +14,10 @@ services:
     command: ["go", "run", "./cmd/goro", "--console", "--api-port", "5600", "--console-port", "5601"]
     environment:
       - S3_ENDPOINT=http://minio:9000
+      # S3 credentials — supplied via environment variables to avoid storing
+      # secrets in the config file.
+      - GORO_S3_ACCESS_KEY=${GORO_S3_ACCESS_KEY:?GORO_S3_ACCESS_KEY must be set}
+      - GORO_S3_SECRET_KEY=${GORO_S3_SECRET_KEY:?GORO_S3_SECRET_KEY must be set}
       # Set SECURE_LINK_SECRET to a strong random value before starting.
       # The same value must be set on the nginx container below.
       - SECURE_LINK_SECRET=${SECURE_LINK_SECRET:?SECURE_LINK_SECRET must be set}
