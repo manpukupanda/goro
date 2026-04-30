@@ -43,7 +43,7 @@ type ThumbnailSpec struct {
 
 type SecureLinkConfig struct {
 	// Secret is the shared key used to sign HLS segment URLs.
-	// Can be overridden at runtime with the SECURE_LINK_SECRET environment variable.
+	// Can be overridden at runtime with the GORO_SECURE_LINK_SECRET environment variable.
 	Secret string `yaml:"secret"`
 	// TTLSec is how long (in seconds) a signed URL remains valid. Defaults to 3600.
 	TTLSec int `yaml:"ttl_sec"`
@@ -172,9 +172,9 @@ func (c *Config) validateAndApplyDefaults() error {
 	}
 
 	// Allow the secure-link secret to be supplied (or overridden) via the
-	// SECURE_LINK_SECRET environment variable so that docker-compose can
+	// GORO_SECURE_LINK_SECRET environment variable so that docker-compose can
 	// inject it without modifying the config file.
-	if envSecret := os.Getenv("SECURE_LINK_SECRET"); envSecret != "" {
+	if envSecret := os.Getenv("GORO_SECURE_LINK_SECRET"); envSecret != "" {
 		c.SecureLink.Secret = envSecret
 	}
 	if c.SecureLink.TTLSec <= 0 {

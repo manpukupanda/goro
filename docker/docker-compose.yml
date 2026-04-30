@@ -17,9 +17,9 @@ services:
       # secrets in the config file.
       - GORO_S3_ACCESS_KEY=${GORO_S3_ACCESS_KEY:?GORO_S3_ACCESS_KEY must be set}
       - GORO_S3_SECRET_KEY=${GORO_S3_SECRET_KEY:?GORO_S3_SECRET_KEY must be set}
-      # Set SECURE_LINK_SECRET to a strong random value before starting.
+      # Set GORO_SECURE_LINK_SECRET to a strong random value before starting.
       # The same value must be set on the nginx container below.
-      - SECURE_LINK_SECRET=${SECURE_LINK_SECRET:?SECURE_LINK_SECRET must be set}
+      - GORO_SECURE_LINK_SECRET=${GORO_SECURE_LINK_SECRET:?GORO_SECURE_LINK_SECRET must be set}
       # API key required to access the public API endpoints.
       - GORO_API_KEY=${GORO_API_KEY:?GORO_API_KEY must be set}
       # Admin console credentials — change before production use.
@@ -35,8 +35,8 @@ services:
     ports:
       - "80:80"
     environment:
-      # Must match the SECURE_LINK_SECRET set on the goro service.
-      - SECURE_LINK_SECRET=${SECURE_LINK_SECRET:?SECURE_LINK_SECRET must be set}
+      # Must match the GORO_SECURE_LINK_SECRET set on the goro service.
+      - SECURE_LINK_SECRET=${GORO_SECURE_LINK_SECRET:?GORO_SECURE_LINK_SECRET must be set}
 
   minio:
     image: minio/minio

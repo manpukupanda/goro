@@ -10,7 +10,7 @@ Before starting for the first time, create a `.env` file in the `docker/` direct
 cp docker/.env.example docker/.env
 ```
 
-The `.env.example` file contains a development-safe default value for `SECURE_LINK_SECRET`.
+The `.env.example` file contains a development-safe default value for `GORO_SECURE_LINK_SECRET`.
 Edit `docker/.env` if you want to use a different value.
 
 Then start the stack:
