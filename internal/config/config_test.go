@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadAppliesDefaults(t *testing.T) {
+	t.Setenv("GORO_API_KEY", "test-key")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(`
@@ -39,5 +40,35 @@ hls:
 	}
 	if cfg.Worker.Concurrency != 2 {
 		t.Fatalf("expected default worker concurrency 2, got %d", cfg.Worker.Concurrency)
+	}
+	if cfg.APIKey != "test-key" {
+		t.Fatalf("expected APIKey to be set from env, got %q", cfg.APIKey)
+	}
+}
+
+func TestLoadFailsWithoutAPIKey(t *testing.T) {
+	t.Setenv("GORO_API_KEY", "")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+s3:
+  endpoint: minio:9000
+  access_key: minio
+  secret_key: minio123
+  bucket: goro
+hls:
+  profiles:
+    - name: 720p
+      width: 1280
+      height: 720
+      video_bitrate: 2800k
+      audio_bitrate: 128k
+`), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("expected Load to fail when GORO_API_KEY is not set")
 	}
 }

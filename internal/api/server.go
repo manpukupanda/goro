@@ -36,10 +36,11 @@ type Server struct {
 	secureLink  config.SecureLinkConfig
 	hlsConfig   config.HLSConfig
 	tokenConfig config.PlaylistTokenConfig
+	apiKey      string
 }
 
-func NewServer(database *sql.DB, q *queue.Queue, s storageGetter, slCfg config.SecureLinkConfig, hlsCfg config.HLSConfig, tokenCfg config.PlaylistTokenConfig) *Server {
-	return &Server{db: database, queue: q, storage: s, secureLink: slCfg, hlsConfig: hlsCfg, tokenConfig: tokenCfg}
+func NewServer(database *sql.DB, q *queue.Queue, s storageGetter, slCfg config.SecureLinkConfig, hlsCfg config.HLSConfig, tokenCfg config.PlaylistTokenConfig, apiKey string) *Server {
+	return &Server{db: database, queue: q, storage: s, secureLink: slCfg, hlsConfig: hlsCfg, tokenConfig: tokenCfg, apiKey: apiKey}
 }
 
 func (s *Server) Router() *gin.Engine {
@@ -48,17 +49,33 @@ func (s *Server) Router() *gin.Engine {
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.POST("/videos", s.uploadVideo)
-	r.GET("/videos/:id/playlist", s.getPlaylist)
-	r.GET("/hls/videos/:id/:profile/:segment", s.getSegment)
+
+	// All routes below require a valid API key.
+	auth := r.Group("/", s.requireAPIKey)
+	auth.POST("/videos", s.uploadVideo)
+	auth.GET("/videos/:id/playlist", s.getPlaylist)
+	auth.GET("/hls/videos/:id/:profile/:segment", s.getSegment)
 
 	// Management endpoints
-	r.PUT("/videos/:id/visibility", s.setVisibility)
-	r.POST("/videos/:id/tokens", s.issueToken)
-	r.DELETE("/videos/:id", s.deleteVideo)
-	r.GET("/videos/:id/download", s.downloadVideo)
+	auth.PUT("/videos/:id/visibility", s.setVisibility)
+	auth.POST("/videos/:id/tokens", s.issueToken)
+	auth.DELETE("/videos/:id", s.deleteVideo)
+	auth.GET("/videos/:id/download", s.downloadVideo)
 
 	return r
+}
+
+// requireAPIKey is a Gin middleware that enforces API key authentication.
+// The key must be supplied in the Authorization header as "Bearer <key>".
+// Requests without a valid key receive 401 Unauthorized.
+func (s *Server) requireAPIKey(c *gin.Context) {
+	const prefix = "Bearer "
+	header := c.GetHeader("Authorization")
+	if !strings.HasPrefix(header, prefix) || strings.TrimPrefix(header, prefix) != s.apiKey {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	c.Next()
 }
 
 func (s *Server) Start(addr string) {
