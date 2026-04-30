@@ -13,7 +13,6 @@ services:
       - "5601:5601"
     command: ["go", "run", "./cmd/goro", "--console", "--api-port", "5600", "--console-port", "5601"]
     environment:
-      - S3_ENDPOINT=http://minio:9000
       # S3 credentials — supplied via environment variables to avoid storing
       # secrets in the config file.
       - GORO_S3_ACCESS_KEY=${GORO_S3_ACCESS_KEY:?GORO_S3_ACCESS_KEY must be set}
