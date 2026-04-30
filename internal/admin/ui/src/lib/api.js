@@ -110,4 +110,12 @@ export const api = {
   getConfig() {
     return request('GET', '/config');
   },
+
+  // Thumbnails
+  async getThumbnailBlobURL(id, name) {
+    const headers = { ...authHeader() };
+    const res = await fetch(`${BASE}/videos/${id}/thumbnails/${encodeURIComponent(name)}`, { headers });
+    if (!res.ok) return null;
+    return URL.createObjectURL(await res.blob());
+  },
 };

@@ -22,6 +22,15 @@ playlist_token:
   # How long (in seconds) a playlist access token remains valid.
   ttl_sec: 900
 
+thumbnails:
+  specs:
+    - name: fixed_5s
+      type: fixed_second
+      # duration_sec: 0 means auto (>= 5s video → 5s, shorter → duration/2)
+      duration_sec: 0
+    - name: representative
+      type: representative
+
 hls:
   profiles:
     - name: 1080p

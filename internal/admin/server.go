@@ -31,13 +31,14 @@ type storageAccessor interface {
 
 // Server is the admin console HTTP server.
 type Server struct {
-	db          *sql.DB
-	queue       *queue.Queue
-	storage     storageAccessor
-	hlsConfig   config.HLSConfig
-	secureLink  config.SecureLinkConfig
-	tokenConfig config.PlaylistTokenConfig
-	credentials gin.Accounts
+	db              *sql.DB
+	queue           *queue.Queue
+	storage         storageAccessor
+	hlsConfig       config.HLSConfig
+	thumbnailConfig config.ThumbnailConfig
+	secureLink      config.SecureLinkConfig
+	tokenConfig     config.PlaylistTokenConfig
+	credentials     gin.Accounts
 }
 
 // NewServer creates a new admin Server. It reads GORO_ADMIN_USER and
@@ -50,6 +51,7 @@ func NewServer(
 	hlsCfg config.HLSConfig,
 	slCfg config.SecureLinkConfig,
 	tokenCfg config.PlaylistTokenConfig,
+	thumbnailCfg config.ThumbnailConfig,
 ) (*Server, error) {
 	user := os.Getenv("GORO_ADMIN_USER")
 	pass := os.Getenv("GORO_ADMIN_PASSWORD")
@@ -57,13 +59,14 @@ func NewServer(
 		return nil, fmt.Errorf("GORO_ADMIN_USER and GORO_ADMIN_PASSWORD must be set")
 	}
 	return &Server{
-		db:          database,
-		queue:       q,
-		storage:     s,
-		hlsConfig:   hlsCfg,
-		secureLink:  slCfg,
-		tokenConfig: tokenCfg,
-		credentials: gin.Accounts{user: pass},
+		db:              database,
+		queue:           q,
+		storage:         s,
+		hlsConfig:       hlsCfg,
+		thumbnailConfig: thumbnailCfg,
+		secureLink:      slCfg,
+		tokenConfig:     tokenCfg,
+		credentials:     gin.Accounts{user: pass},
 	}, nil
 }
 
@@ -80,6 +83,7 @@ func (s *Server) Router() *gin.Engine {
 		api.DELETE("/videos/:id", s.deleteVideo)
 		api.GET("/videos/:id/playlist", s.getPlaylist)
 		api.GET("/videos/:id/download", s.downloadVideo)
+		api.GET("/videos/:id/thumbnails/:name", s.getThumbnail)
 		api.GET("/hls/:id/:profile/:segment", s.getSegment)
 		api.GET("/jobs", s.listJobs)
 		api.GET("/config", s.getConfig)
@@ -438,7 +442,8 @@ ORDER BY j.created_at DESC
 }
 
 // getConfig returns the HLS profile configuration so the SPA can populate
-// the profile selector in the video player.
+// the profile selector in the video player, and the thumbnail spec names so
+// the SPA knows which thumbnails to display.
 func (s *Server) getConfig(c *gin.Context) {
 	type profile struct {
 		Name   string `json:"name"`
@@ -449,7 +454,34 @@ func (s *Server) getConfig(c *gin.Context) {
 	for _, p := range s.hlsConfig.Profiles {
 		profiles = append(profiles, profile{Name: p.Name, Width: p.Width, Height: p.Height})
 	}
-	c.JSON(http.StatusOK, gin.H{"profiles": profiles})
+
+	thumbNames := make([]string, 0, len(s.thumbnailConfig.Specs))
+	for _, spec := range s.thumbnailConfig.Specs {
+		thumbNames = append(thumbNames, spec.Name)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"profiles": profiles, "thumbnail_specs": thumbNames})
+}
+
+// getThumbnail streams a thumbnail image from storage.
+func (s *Server) getThumbnail(c *gin.Context) {
+	id := c.Param("id")
+	name := c.Param("name")
+
+	objectName := fmt.Sprintf("videos/%s/thumbnails/%s.jpg", id, name)
+	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "thumbnail not found"})
+		return
+	}
+	defer rc.Close()
+
+	c.Header("Content-Type", "image/jpeg")
+	c.Header("Content-Length", strconv.FormatInt(size, 10))
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, rc); err != nil {
+		log.Printf("admin: error streaming thumbnail %s: %v", objectName, err)
+	}
 }
 
 // rewriteAdminPlaylist rewrites an m3u8 playlist so that each segment line

@@ -46,11 +46,11 @@ func main() {
 	// Start the configured number of worker goroutines. Keep this value low;
 	// ffmpeg is CPU-intensive and excessive parallelism degrades encoding performance.
 	for i := 0; i < cfg.Worker.Concurrency; i++ {
-		go worker.Start(q, s3, cfg.HLS)
+		go worker.Start(q, s3, cfg.HLS, cfg.Thumbnails)
 	}
 
 	if *enableConsole {
-		adminSrv, err := admin.NewServer(database, q, s3, cfg.HLS, cfg.SecureLink, cfg.PlaylistToken)
+		adminSrv, err := admin.NewServer(database, q, s3, cfg.HLS, cfg.SecureLink, cfg.PlaylistToken, cfg.Thumbnails)
 		if err != nil {
 			log.Fatalf("failed to initialize admin console: %v", err)
 		}
