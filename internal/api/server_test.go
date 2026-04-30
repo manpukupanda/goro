@@ -163,7 +163,6 @@ func TestGetPlaylistRewritesSegmentURLs(t *testing.T) {
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile, nil)
-	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -196,7 +195,6 @@ func TestGetPlaylistUsesDefaultProfile(t *testing.T) {
 
 	// No ?profile= query param — should fall back to hlsConfig.Profiles[0]
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist", nil)
-	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -212,7 +210,6 @@ func TestGetPlaylistNotFound(t *testing.T) {
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/videos/missing/playlist?profile=720p", nil)
-	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -425,7 +422,6 @@ func TestGetPlaylistPrivateWithValidToken(t *testing.T) {
 
 	// Request with valid token
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile+"&token=validtoken123", nil)
-	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -448,7 +444,6 @@ func TestGetPlaylistPrivateWithoutToken(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile=720p", nil)
-	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusForbidden {
@@ -477,7 +472,6 @@ func TestGetPlaylistPrivateWithExpiredToken(t *testing.T) {
 	_, _ = database.Exec(`INSERT INTO playlist_tokens (token, video_id, expires_at) VALUES ('expiredtok', ?, ?)`, internalID, expiredAt)
 
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile+"&token=expiredtok", nil)
-	authRequest(req)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusForbidden {
@@ -519,6 +513,55 @@ func TestHealthzNoAuthRequired(t *testing.T) {
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected /healthz to return 200 without auth, got %d", res.Code)
+	}
+}
+
+func TestPlaylistNoAuthRequired(t *testing.T) {
+	const (
+		videoID = "noauth1"
+		profile = "720p"
+	)
+	m3u8 := "#EXTM3U\n#EXT-X-ENDLIST\n"
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.m3u8", videoID, profile): m3u8,
+		},
+	}
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile}}}
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	// No Authorization header
+	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile, nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected /videos/:id/playlist to return 200 without auth, got %d", res.Code)
+	}
+}
+
+func TestSegmentNoAuthRequired(t *testing.T) {
+	const (
+		videoID = "noauth2"
+		profile = "720p"
+		segment = "segment000.ts"
+	)
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/%s", videoID, profile, segment): "ts-data",
+		},
+	}
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{}, config.HLSConfig{}, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	// No Authorization header
+	req := httptest.NewRequest(http.MethodGet, "/hls/videos/"+videoID+"/"+profile+"/"+segment, nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected /hls/videos/:id/:profile/:segment to return 200 without auth, got %d", res.Code)
 	}
 }
 

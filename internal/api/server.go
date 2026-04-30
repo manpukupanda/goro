@@ -46,15 +46,16 @@ func NewServer(database *sql.DB, q *queue.Queue, s storageGetter, slCfg config.S
 func (s *Server) Router() *gin.Engine {
 	r := gin.Default()
 
+	// Unauthenticated routes.
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	r.GET("/videos/:id/playlist", s.getPlaylist)
+	r.GET("/hls/videos/:id/:profile/:segment", s.getSegment)
 
 	// All routes below require a valid API key.
 	auth := r.Group("/", s.requireAPIKey)
 	auth.POST("/videos", s.uploadVideo)
-	auth.GET("/videos/:id/playlist", s.getPlaylist)
-	auth.GET("/hls/videos/:id/:profile/:segment", s.getSegment)
 
 	// Management endpoints
 	auth.PUT("/videos/:id/visibility", s.setVisibility)
