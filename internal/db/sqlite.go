@@ -2,7 +2,6 @@ package db
 
 import (
 	"database/sql"
-	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -19,30 +18,22 @@ func Open(path string) (*sql.DB, error) {
 
 	if _, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS videos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    public_id TEXT UNIQUE NOT NULL,
-    original_name TEXT NOT NULL,
-    temp_path TEXT NOT NULL,
-    status TEXT NOT NULL,
-    visibility TEXT NOT NULL DEFAULT 'private',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    public_id     TEXT    UNIQUE NOT NULL,
+    original_name TEXT    NOT NULL,
+    temp_path     TEXT    NOT NULL,
+    status        TEXT    NOT NULL,
+    visibility    TEXT    NOT NULL DEFAULT 'private',
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    duration_sec  REAL,
+    width         INTEGER,
+    height        INTEGER,
+    video_codec   TEXT,
+    bitrate       INTEGER,
+    framerate     TEXT
 );
 `); err != nil {
 		return nil, err
-	}
-
-	// Idempotent migration: add metadata columns for existing databases.
-	for _, stmt := range []string{
-		`ALTER TABLE videos ADD COLUMN duration_sec REAL`,
-		`ALTER TABLE videos ADD COLUMN width INTEGER`,
-		`ALTER TABLE videos ADD COLUMN height INTEGER`,
-		`ALTER TABLE videos ADD COLUMN video_codec TEXT`,
-		`ALTER TABLE videos ADD COLUMN bitrate INTEGER`,
-		`ALTER TABLE videos ADD COLUMN framerate TEXT`,
-	} {
-		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-			return nil, err
-		}
 	}
 
 	if _, err := db.Exec(`
