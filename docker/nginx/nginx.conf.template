@@ -20,9 +20,18 @@ server {
         proxy_cache_methods GET HEAD;
         proxy_cache_key $uri;
         proxy_cache_valid 200 1h;
-        proxy_cache_valid 206 1h;
         proxy_cache_lock on;
         add_header X-Cache-Status $upstream_cache_status always;
+
+        proxy_pass http://goro:5600;
+    }
+
+    location ~ ^/hls/ {
+        secure_link $arg_md5,$arg_expires;
+        secure_link_md5 "$secure_link_expires${uri}${SECURE_LINK_SECRET}";
+
+        if ($secure_link = "") { return 403; }
+        if ($secure_link = "0") { return 410; }
 
         proxy_pass http://goro:5600;
     }
