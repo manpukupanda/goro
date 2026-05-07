@@ -17,11 +17,38 @@
   let deletingId = $state(null);
   let downloadingId = $state(null);
 
+  // Filter state
+  let filterName = $state('');
+  let filterStatus = $state('');
+  let filterVisibility = $state('');
+  let filterCodec = $state('');
+  let filterDurationMin = $state('');
+  let filterDurationMax = $state('');
+  let filterWidthMin = $state('');
+  let filterWidthMax = $state('');
+  let filterHeightMin = $state('');
+  let filterHeightMax = $state('');
+
+  function buildFilterParams() {
+    return {
+      name: filterName,
+      status: filterStatus,
+      visibility: filterVisibility,
+      codec: filterCodec,
+      duration_min: filterDurationMin,
+      duration_max: filterDurationMax,
+      width_min: filterWidthMin,
+      width_max: filterWidthMax,
+      height_min: filterHeightMin,
+      height_max: filterHeightMax,
+    };
+  }
+
   async function load() {
     loading = true;
     error = '';
     try {
-      const [vRes, cRes] = await Promise.all([api.listVideos(), api.getConfig()]);
+      const [vRes, cRes] = await Promise.all([api.listVideos(buildFilterParams()), api.getConfig()]);
       videos = vRes.videos ?? [];
       profiles = cRes.profiles ?? [];
       thumbnailSpecs = cRes.thumbnail_specs ?? [];
@@ -30,6 +57,24 @@
     } finally {
       loading = false;
     }
+  }
+
+  function applyFilters() {
+    load();
+  }
+
+  function resetFilters() {
+    filterName = '';
+    filterStatus = '';
+    filterVisibility = '';
+    filterCodec = '';
+    filterDurationMin = '';
+    filterDurationMax = '';
+    filterWidthMin = '';
+    filterWidthMax = '';
+    filterHeightMin = '';
+    filterHeightMax = '';
+    load();
   }
 
   async function toggleVisibility(video) {
@@ -85,6 +130,30 @@
 
   const statusLabel = { queued: 'Queued', processing: 'Processing', ready: 'Ready', failed: 'Failed' };
   const statusClass = { queued: 'badge-queued', processing: 'badge-processing', ready: 'badge-ready', failed: 'badge-failed' };
+
+  /** Format seconds as mm:ss or h:mm:ss. */
+  function formatDuration(sec) {
+    if (sec == null) return '—';
+    const s = Math.round(sec);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const ss = String(s % 60).padStart(2, '0');
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${ss}`;
+    return `${m}:${ss}`;
+  }
+
+  /** Format bit/s as Mbps or kbps. */
+  function formatBitrate(bps) {
+    if (bps == null) return '—';
+    if (bps >= 1_000_000) return (bps / 1_000_000).toFixed(1) + ' Mbps';
+    return Math.round(bps / 1000) + ' kbps';
+  }
+
+  /** Format framerate float to two decimals. */
+  function formatFps(fps) {
+    if (fps == null) return '—';
+    return fps.toFixed(2) + ' fps';
+  }
 </script>
 
 <div class="page">
@@ -92,6 +161,67 @@
     <h2>Videos</h2>
     <button class="btn-primary" onclick={() => { showUpload = true; }}>＋ Upload</button>
   </div>
+
+  <!-- Filter bar -->
+  <details class="filter-box">
+    <summary class="filter-summary">Filters</summary>
+    <div class="filter-grid">
+      <label>
+        File name
+        <input type="text" bind:value={filterName} placeholder="partial match" />
+      </label>
+      <label>
+        Status
+        <select bind:value={filterStatus}>
+          <option value="">All</option>
+          <option value="queued">Queued</option>
+          <option value="processing">Processing</option>
+          <option value="ready">Ready</option>
+          <option value="failed">Failed</option>
+        </select>
+      </label>
+      <label>
+        Visibility
+        <select bind:value={filterVisibility}>
+          <option value="">All</option>
+          <option value="public">Public</option>
+          <option value="private">Private</option>
+        </select>
+      </label>
+      <label>
+        Codec
+        <input type="text" bind:value={filterCodec} placeholder="e.g. h264" />
+      </label>
+      <label>
+        Duration min (s)
+        <input type="number" min="0" step="1" bind:value={filterDurationMin} placeholder="0" />
+      </label>
+      <label>
+        Duration max (s)
+        <input type="number" min="0" step="1" bind:value={filterDurationMax} placeholder="∞" />
+      </label>
+      <label>
+        Width min (px)
+        <input type="number" min="0" step="1" bind:value={filterWidthMin} placeholder="0" />
+      </label>
+      <label>
+        Width max (px)
+        <input type="number" min="0" step="1" bind:value={filterWidthMax} placeholder="∞" />
+      </label>
+      <label>
+        Height min (px)
+        <input type="number" min="0" step="1" bind:value={filterHeightMin} placeholder="0" />
+      </label>
+      <label>
+        Height max (px)
+        <input type="number" min="0" step="1" bind:value={filterHeightMax} placeholder="∞" />
+      </label>
+    </div>
+    <div class="filter-actions">
+      <button class="btn-primary" onclick={applyFilters}>Apply</button>
+      <button class="btn-secondary" onclick={resetFilters}>Reset</button>
+    </div>
+  </details>
 
   {#if error}
     <p class="error">{error}</p>
@@ -111,6 +241,11 @@
             <th>Status</th>
             <th>Visibility</th>
             <th>Thumbnail</th>
+            <th>Duration</th>
+            <th>Resolution</th>
+            <th>Codec</th>
+            <th>Bitrate</th>
+            <th>FPS</th>
             <th>Created At</th>
             <th>Actions</th>
           </tr>
@@ -141,6 +276,11 @@
                   <span class="muted">—</span>
                 {/if}
               </td>
+              <td class="mono">{formatDuration(v.duration_sec)}</td>
+              <td class="mono">{v.width != null && v.height != null ? `${v.width}×${v.height}` : '—'}</td>
+              <td class="mono">{v.video_codec ?? '—'}</td>
+              <td class="mono">{formatBitrate(v.bitrate)}</td>
+              <td class="mono">{formatFps(v.framerate_float)}</td>
               <td class="mono">{v.created_at ?? ''}</td>
               <td class="actions-cell">
                 <button
@@ -190,9 +330,26 @@
   h2 { margin: 0; }
   .btn-primary { padding: .5rem 1rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: .875rem; }
   .btn-primary:hover { background: #1d4ed8; }
+  .btn-secondary { padding: .4rem .8rem; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; font-size: .875rem; }
+  .btn-secondary:hover { background: #e5e7eb; }
+
+  /* Filter bar */
+  .filter-box { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 6px; padding: .75rem 1rem; background: #fafafa; }
+  .filter-summary { cursor: pointer; font-weight: 600; font-size: .875rem; color: #374151; user-select: none; }
+  .filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: .6rem;
+    margin-top: .75rem;
+  }
+  .filter-grid label { display: flex; flex-direction: column; font-size: .8rem; color: #374151; gap: .2rem; }
+  .filter-grid input,
+  .filter-grid select { padding: .3rem .5rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: .8rem; }
+  .filter-actions { display: flex; gap: .5rem; margin-top: .75rem; }
+
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-  th { text-align: left; padding: .5rem .75rem; background: #f3f4f6; border-bottom: 2px solid #e5e7eb; font-weight: 600; }
+  th { text-align: left; padding: .5rem .75rem; background: #f3f4f6; border-bottom: 2px solid #e5e7eb; font-weight: 600; white-space: nowrap; }
   td { padding: .5rem .75rem; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
   tr:hover td { background: #f9fafb; }
   .mono { font-family: monospace; font-size: .8rem; }
@@ -223,3 +380,4 @@
   .error { color: #dc2626; font-size: .875rem; }
   .muted { color: #9ca3af; }
 </style>
+

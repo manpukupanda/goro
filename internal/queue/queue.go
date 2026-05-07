@@ -127,6 +127,35 @@ func (q *Queue) MarkDone(id int64) {
 	}
 }
 
+// VideoMetadata holds extracted technical properties of an uploaded video.
+type VideoMetadata struct {
+	DurationSec float64
+	Width       int
+	Height      int
+	VideoCodec  string
+	Bitrate     int64  // bits per second (format-level)
+	Framerate   string // rational string e.g. "30000/1001"; empty if unknown
+}
+
+// UpdateVideoMetadata stores extracted metadata on a video row.
+func (q *Queue) UpdateVideoMetadata(publicID string, meta VideoMetadata) error {
+	var framerate interface{}
+	if meta.Framerate != "" {
+		framerate = meta.Framerate
+	}
+	_, err := q.db.Exec(`
+		UPDATE videos
+		SET duration_sec = ?,
+		    width        = ?,
+		    height       = ?,
+		    video_codec  = ?,
+		    bitrate      = ?,
+		    framerate    = ?
+		WHERE public_id  = ?`,
+		meta.DurationSec, meta.Width, meta.Height, meta.VideoCodec, meta.Bitrate, framerate, publicID)
+	return err
+}
+
 func (q *Queue) MarkFailed(id int64, failureErr error) {
 	tx, err := q.db.Begin()
 	if err != nil {

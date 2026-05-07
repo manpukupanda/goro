@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -28,6 +29,20 @@ CREATE TABLE IF NOT EXISTS videos (
 );
 `); err != nil {
 		return nil, err
+	}
+
+	// Idempotent migration: add metadata columns for existing databases.
+	for _, stmt := range []string{
+		`ALTER TABLE videos ADD COLUMN duration_sec REAL`,
+		`ALTER TABLE videos ADD COLUMN width INTEGER`,
+		`ALTER TABLE videos ADD COLUMN height INTEGER`,
+		`ALTER TABLE videos ADD COLUMN video_codec TEXT`,
+		`ALTER TABLE videos ADD COLUMN bitrate INTEGER`,
+		`ALTER TABLE videos ADD COLUMN framerate TEXT`,
+	} {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, err
+		}
 	}
 
 	if _, err := db.Exec(`
