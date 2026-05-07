@@ -147,12 +147,17 @@ func TestParseFFprobeOutput_FullVideo(t *testing.T) {
 	}
 
 	want := queue.VideoMetadata{
-		DurationSec: 123.456,
-		Width:       1920,
-		Height:      1080,
-		VideoCodec:  "h264",
-		Bitrate:     4800000, // stream-level preferred over format-level
-		Framerate:   "30000/1001",
+		DurationSec:  123.456,
+		Width:        1920,
+		Height:       1080,
+		VideoCodec:   "h264",
+		Bitrate:      4800000, // stream-level preferred over format-level
+		Framerate:    "30000/1001",
+		AspectRatio:  "16:9", // computed from 1920×1080 via GCD
+		HasVideo:     true,
+		HasAudio:     true,
+		AudioCodec:   "aac",
+		AudioBitrate: 128000,
 	}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
@@ -187,6 +192,15 @@ func TestParseFFprobeOutput_NoBitRateInStream(t *testing.T) {
 	if got.Framerate != "25/1" {
 		t.Errorf("expected framerate 25/1, got %q", got.Framerate)
 	}
+	if !got.HasVideo {
+		t.Errorf("expected HasVideo=true for video-only stream")
+	}
+	if got.HasAudio {
+		t.Errorf("expected HasAudio=false for video-only stream")
+	}
+	if got.AspectRatio != "16:9" {
+		t.Errorf("expected AspectRatio 16:9 for 1280x720, got %q", got.AspectRatio)
+	}
 }
 
 func TestParseFFprobeOutput_DegenerateFramerate(t *testing.T) {
@@ -211,6 +225,12 @@ func TestParseFFprobeOutput_DegenerateFramerate(t *testing.T) {
 	if got.Framerate != "" {
 		t.Errorf("expected empty Framerate for 0/0, got %q", got.Framerate)
 	}
+	if !got.HasVideo {
+		t.Errorf("expected HasVideo=true")
+	}
+	if got.AspectRatio != "4:3" {
+		t.Errorf("expected AspectRatio 4:3 for 640x480, got %q", got.AspectRatio)
+	}
 }
 
 func TestParseFFprobeOutput_NoVideoStream(t *testing.T) {
@@ -231,5 +251,14 @@ func TestParseFFprobeOutput_NoVideoStream(t *testing.T) {
 	}
 	if got.DurationSec != 200.0 {
 		t.Errorf("expected duration 200.0, got %v", got.DurationSec)
+	}
+	if got.HasVideo {
+		t.Errorf("expected HasVideo=false for audio-only")
+	}
+	if !got.HasAudio {
+		t.Errorf("expected HasAudio=true for audio-only")
+	}
+	if got.AudioCodec != "mp3" {
+		t.Errorf("expected AudioCodec mp3, got %q", got.AudioCodec)
 	}
 }

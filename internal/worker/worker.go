@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"goro/internal/config"
@@ -156,18 +157,34 @@ type ffprobeOutput struct {
 	Format  ffprobeFormat  `json:"format"`
 }
 
+type ffprobeSideData struct {
+	SideDataType string `json:"side_data_type"`
+	Rotation     int    `json:"rotation"`
+}
+
+type ffprobeStreamTags struct {
+	Rotate string `json:"rotate"`
+}
+
 type ffprobeStream struct {
-	CodecType  string `json:"codec_type"`
-	CodecName  string `json:"codec_name"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
-	RFrameRate string `json:"r_frame_rate"`
-	BitRate    string `json:"bit_rate"`
+	CodecType         string            `json:"codec_type"`
+	CodecName         string            `json:"codec_name"`
+	Width             int               `json:"width"`
+	Height            int               `json:"height"`
+	RFrameRate        string            `json:"r_frame_rate"`
+	BitRate           string            `json:"bit_rate"`
+	SampleRate        string            `json:"sample_rate"`
+	Channels          int               `json:"channels"`
+	DisplayAspectRatio string           `json:"display_aspect_ratio"`
+	Tags              ffprobeStreamTags `json:"tags"`
+	SideDataList      []ffprobeSideData `json:"side_data_list"`
 }
 
 type ffprobeFormat struct {
-	Duration string `json:"duration"`
-	BitRate  string `json:"bit_rate"`
+	Duration   string `json:"duration"`
+	BitRate    string `json:"bit_rate"`
+	FormatName string `json:"format_name"`
+	Size       string `json:"size"`
 }
 
 // probeVideoMetadata runs ffprobe on inputPath and returns extracted metadata.
@@ -212,12 +229,22 @@ func parseFFprobeOutput(data []byte) (queue.VideoMetadata, error) {
 			log.Printf("ffprobe: failed to parse format bitrate %q: %v", result.Format.BitRate, parseErr)
 		}
 	}
+	if result.Format.FormatName != "" {
+		// format_name may be a comma-separated list (e.g. "mov,mp4,m4a,3gp,3g2,mj2"); take the first.
+		meta.ContainerFormat = strings.SplitN(result.Format.FormatName, ",", 2)[0]
+	}
+	if result.Format.Size != "" {
+		if sz, err := strconv.ParseInt(result.Format.Size, 10, 64); err == nil {
+			meta.FileSize = sz
+		}
+	}
 
-	// Use the first video stream for resolution, codec, and framerate.
+	// Use the first video stream for resolution, codec, framerate, rotation, and aspect ratio.
 	for _, stream := range result.Streams {
 		if stream.CodecType != "video" {
 			continue
 		}
+		meta.HasVideo = true
 		meta.Width = stream.Width
 		meta.Height = stream.Height
 		meta.VideoCodec = stream.CodecName
@@ -232,10 +259,59 @@ func parseFFprobeOutput(data []byte) (queue.VideoMetadata, error) {
 		if fr != "" && fr != "0/0" && fr != "0/1" {
 			meta.Framerate = fr
 		}
+		// Aspect ratio: prefer ffprobe's display_aspect_ratio, fall back to GCD computation.
+		if ar := stream.DisplayAspectRatio; ar != "" && ar != "N/A" && ar != "0:1" {
+			meta.AspectRatio = ar
+		} else if stream.Width > 0 && stream.Height > 0 {
+			g := gcd(stream.Width, stream.Height)
+			meta.AspectRatio = fmt.Sprintf("%d:%d", stream.Width/g, stream.Height/g)
+		}
+		// Rotation: prefer side_data "Display Matrix", fall back to tags.rotate.
+		for _, sd := range stream.SideDataList {
+			if sd.SideDataType == "Display Matrix" {
+				// The Display Matrix rotation field is the negation of the visual rotation.
+				meta.Rotation = -sd.Rotation
+				break
+			}
+		}
+		if meta.Rotation == 0 && stream.Tags.Rotate != "" {
+			if r, err := strconv.Atoi(stream.Tags.Rotate); err == nil {
+				meta.Rotation = r
+			}
+		}
+		break
+	}
+
+	// Use the first audio stream for audio metadata.
+	for _, stream := range result.Streams {
+		if stream.CodecType != "audio" {
+			continue
+		}
+		meta.HasAudio = true
+		meta.AudioCodec = stream.CodecName
+		if stream.BitRate != "" {
+			if br, err := strconv.ParseInt(stream.BitRate, 10, 64); err == nil && br > 0 {
+				meta.AudioBitrate = br
+			}
+		}
+		if stream.SampleRate != "" {
+			if sr, err := strconv.Atoi(stream.SampleRate); err == nil {
+				meta.SampleRate = sr
+			}
+		}
+		meta.Channels = stream.Channels
 		break
 	}
 
 	return meta, nil
+}
+
+// gcd returns the greatest common divisor of a and b.
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // thumbnailFilterFrames returns the number of frames to analyse with the ffmpeg

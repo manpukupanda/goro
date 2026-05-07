@@ -25,12 +25,22 @@ CREATE TABLE IF NOT EXISTS videos (
     status        TEXT    NOT NULL,
     visibility    TEXT    NOT NULL DEFAULT 'private',
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-    duration_sec  REAL,
-    width         INTEGER,
-    height        INTEGER,
-    video_codec   TEXT,
-    bitrate       INTEGER,
-    framerate     TEXT
+    duration_sec     REAL,
+    width            INTEGER,
+    height           INTEGER,
+    video_codec      TEXT,
+    bitrate          INTEGER,
+    framerate        TEXT,
+    container_format TEXT,
+    audio_codec      TEXT,
+    audio_bitrate    INTEGER,
+    sample_rate      INTEGER,
+    channels         INTEGER,
+    file_size        INTEGER,
+    aspect_ratio     TEXT,
+    rotation         INTEGER,
+    has_audio        INTEGER,
+    has_video        INTEGER
 );
 `); err != nil {
 		return nil, err

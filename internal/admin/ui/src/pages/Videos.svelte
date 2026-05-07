@@ -154,6 +154,41 @@
     if (fps == null) return '—';
     return fps.toFixed(2) + ' fps';
   }
+
+  /** Format file size in bytes. */
+  function formatFileSize(bytes) {
+    if (bytes == null) return '—';
+    if (bytes >= 1_000_000_000) return (bytes / 1_000_000_000).toFixed(1) + ' GB';
+    if (bytes >= 1_000_000) return (bytes / 1_000_000).toFixed(1) + ' MB';
+    return Math.round(bytes / 1000) + ' kB';
+  }
+
+  /** Format sample rate in Hz or kHz. */
+  function formatSampleRate(hz) {
+    if (hz == null) return '—';
+    if (hz >= 1000) return (hz / 1000).toFixed(1) + ' kHz';
+    return hz + ' Hz';
+  }
+
+  /** Format channel count as Mono/Stereo/n ch. */
+  function formatChannels(ch) {
+    if (ch == null) return '—';
+    if (ch === 1) return 'Mono';
+    if (ch === 2) return 'Stereo';
+    return ch + ' ch';
+  }
+
+  /** Format rotation in degrees. */
+  function formatRotation(r) {
+    if (r == null) return '—';
+    return r + '°';
+  }
+
+  /** Format boolean flag as ✓ or ✗. */
+  function formatFlag(b) {
+    if (b == null) return '—';
+    return b ? '✓' : '✗';
+  }
 </script>
 
 <div class="page">
@@ -243,9 +278,19 @@
             <th>Thumbnail</th>
             <th>Duration</th>
             <th>Resolution</th>
+            <th>Aspect</th>
             <th>Codec</th>
             <th>Bitrate</th>
             <th>FPS</th>
+            <th>Container</th>
+            <th>Rotation</th>
+            <th>Has Video</th>
+            <th>Has Audio</th>
+            <th>Audio Codec</th>
+            <th>Audio Bitrate</th>
+            <th>Sample Rate</th>
+            <th>Channels</th>
+            <th>File Size</th>
             <th>Created At</th>
             <th>Actions</th>
           </tr>
@@ -278,9 +323,19 @@
               </td>
               <td class="mono">{formatDuration(v.duration_sec)}</td>
               <td class="mono">{v.width != null && v.height != null ? `${v.width}×${v.height}` : '—'}</td>
+              <td class="mono">{v.aspect_ratio ?? '—'}</td>
               <td class="mono">{v.video_codec ?? '—'}</td>
               <td class="mono">{formatBitrate(v.bitrate)}</td>
               <td class="mono">{formatFps(v.framerate_float)}</td>
+              <td class="mono">{v.container_format ?? '—'}</td>
+              <td class="mono">{formatRotation(v.rotation)}</td>
+              <td class="mono">{formatFlag(v.has_video)}</td>
+              <td class="mono">{formatFlag(v.has_audio)}</td>
+              <td class="mono">{v.audio_codec ?? '—'}</td>
+              <td class="mono">{formatBitrate(v.audio_bitrate)}</td>
+              <td class="mono">{formatSampleRate(v.sample_rate)}</td>
+              <td class="mono">{formatChannels(v.channels)}</td>
+              <td class="mono">{formatFileSize(v.file_size)}</td>
               <td class="mono">{v.created_at ?? ''}</td>
               <td class="actions-cell">
                 <button
