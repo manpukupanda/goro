@@ -199,10 +199,18 @@ func parseFFprobeOutput(data []byte) (queue.VideoMetadata, error) {
 
 	// Duration and total bitrate come from the format section.
 	if result.Format.Duration != "" {
-		meta.DurationSec, _ = strconv.ParseFloat(result.Format.Duration, 64)
+		var parseErr error
+		meta.DurationSec, parseErr = strconv.ParseFloat(result.Format.Duration, 64)
+		if parseErr != nil {
+			log.Printf("ffprobe: failed to parse duration %q: %v", result.Format.Duration, parseErr)
+		}
 	}
 	if result.Format.BitRate != "" {
-		meta.Bitrate, _ = strconv.ParseInt(result.Format.BitRate, 10, 64)
+		var parseErr error
+		meta.Bitrate, parseErr = strconv.ParseInt(result.Format.BitRate, 10, 64)
+		if parseErr != nil {
+			log.Printf("ffprobe: failed to parse format bitrate %q: %v", result.Format.BitRate, parseErr)
+		}
 	}
 
 	// Use the first video stream for resolution, codec, and framerate.

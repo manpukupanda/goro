@@ -194,11 +194,11 @@
       </label>
       <label>
         Duration min (s)
-        <input type="number" min="0" step="1" bind:value={filterDurationMin} placeholder="0" />
+        <input type="number" min="0" step="any" bind:value={filterDurationMin} placeholder="0" />
       </label>
       <label>
         Duration max (s)
-        <input type="number" min="0" step="1" bind:value={filterDurationMax} placeholder="∞" />
+        <input type="number" min="0" step="any" bind:value={filterDurationMax} placeholder="∞" />
       </label>
       <label>
         Width min (px)
