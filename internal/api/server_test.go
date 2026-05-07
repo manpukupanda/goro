@@ -605,3 +605,155 @@ func openTestDB(t *testing.T) *sql.DB {
 	})
 	return database
 }
+
+// ----- GET /videos tests -----
+
+func TestListVideosEmpty(t *testing.T) {
+	database := openTestDB(t)
+	router := newTestServer(t, database).Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/videos", nil)
+	authRequest(req)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Videos []interface{} `json:"videos"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(body.Videos) != 0 {
+		t.Fatalf("expected empty videos list, got %d items", len(body.Videos))
+	}
+}
+
+func TestListVideosReturnsUploadedVideo(t *testing.T) {
+	database := openTestDB(t)
+	router := newTestServer(t, database).Router()
+	uploadTestVideo(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/videos", nil)
+	authRequest(req)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var body struct {
+		Videos []struct {
+			PublicID     string `json:"public_id"`
+			OriginalName string `json:"original_name"`
+			Status       string `json:"status"`
+		} `json:"videos"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(body.Videos) != 1 {
+		t.Fatalf("expected 1 video, got %d", len(body.Videos))
+	}
+	if body.Videos[0].Status != "queued" {
+		t.Fatalf("expected status queued, got %s", body.Videos[0].Status)
+	}
+}
+
+func TestListVideosFilterByStatus(t *testing.T) {
+	database := openTestDB(t)
+	router := newTestServer(t, database).Router()
+	uploadTestVideo(t, router) // status = queued
+
+	// Filter for a status that doesn't exist yet.
+	req := httptest.NewRequest(http.MethodGet, "/videos?status=ready", nil)
+	authRequest(req)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.Code)
+	}
+	var body struct {
+		Videos []interface{} `json:"videos"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(body.Videos) != 0 {
+		t.Fatalf("expected 0 videos with status=ready, got %d", len(body.Videos))
+	}
+}
+
+func TestListVideosFilterByName(t *testing.T) {
+	database := openTestDB(t)
+	router := newTestServer(t, database).Router()
+	uploadTestVideo(t, router) // original_name = "test.mp4"
+
+	req := httptest.NewRequest(http.MethodGet, "/videos?name=test", nil)
+	authRequest(req)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.Code)
+	}
+	var body struct {
+		Videos []interface{} `json:"videos"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(body.Videos) != 1 {
+		t.Fatalf("expected 1 video matching name=test, got %d", len(body.Videos))
+	}
+
+	// Name that doesn't match.
+	req2 := httptest.NewRequest(http.MethodGet, "/videos?name=nomatch", nil)
+	authRequest(req2)
+	res2 := httptest.NewRecorder()
+	router.ServeHTTP(res2, req2)
+	var body2 struct {
+		Videos []interface{} `json:"videos"`
+	}
+	_ = json.Unmarshal(res2.Body.Bytes(), &body2)
+	if len(body2.Videos) != 0 {
+		t.Fatalf("expected 0 videos for non-matching name, got %d", len(body2.Videos))
+	}
+}
+
+func TestListVideosRequiresAuth(t *testing.T) {
+	database := openTestDB(t)
+	router := newTestServer(t, database).Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/videos", nil)
+	// No auth header.
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", res.Code)
+	}
+}
+
+func TestParseRational(t *testing.T) {
+	cases := []struct {
+		input string
+		want  float64
+	}{
+		{"30000/1001", 30000.0 / 1001.0},
+		{"25/1", 25.0},
+		{"24/1", 24.0},
+		{"0/0", 0.0},
+		{"30", 30.0},
+	}
+	for _, tc := range cases {
+		got := parseRational(tc.input)
+		if got != tc.want {
+			t.Errorf("parseRational(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}

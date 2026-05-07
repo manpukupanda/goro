@@ -39,8 +39,15 @@ async function request(method, path, body, isFormData) {
 
 export const api = {
   // Videos
-  listVideos() {
-    return request('GET', '/videos');
+  listVideos(params = {}) {
+    const qs = new URLSearchParams();
+    for (const [key, val] of Object.entries(params)) {
+      if (val !== '' && val !== null && val !== undefined) {
+        qs.append(key, String(val));
+      }
+    }
+    const query = qs.toString();
+    return request('GET', `/videos${query ? '?' + query : ''}`);
   },
   uploadVideo(file, onProgress) {
     return new Promise((resolve, reject) => {

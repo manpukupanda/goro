@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"goro/internal/config"
+	"goro/internal/queue"
 )
 
 func TestBuildFFmpegArgsIncludesProfileSettings(t *testing.T) {
@@ -114,5 +115,150 @@ func TestGenerateThumbnailArgs_Representative(t *testing.T) {
 	filterArg := strings.Join([]string{"thumbnail", "n=60"}, "=")
 	if !strings.Contains(filterArg, "thumbnail") || !strings.Contains(filterArg, "60") {
 		t.Fatalf("unexpected filter arg: %s", filterArg)
+	}
+}
+
+func TestParseFFprobeOutput_FullVideo(t *testing.T) {
+	raw := []byte(`{
+		"streams": [
+			{
+				"codec_type": "video",
+				"codec_name": "h264",
+				"width": 1920,
+				"height": 1080,
+				"r_frame_rate": "30000/1001",
+				"bit_rate": "4800000"
+			},
+			{
+				"codec_type": "audio",
+				"codec_name": "aac",
+				"bit_rate": "128000"
+			}
+		],
+		"format": {
+			"duration": "123.456",
+			"bit_rate": "4928000"
+		}
+	}`)
+
+	got, err := parseFFprobeOutput(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := queue.VideoMetadata{
+		DurationSec:  123.456,
+		Width:        1920,
+		Height:       1080,
+		VideoCodec:   "h264",
+		Bitrate:      4800000, // stream-level preferred over format-level
+		Framerate:    "30000/1001",
+		AspectRatio:  "16:9", // computed from 1920×1080 via GCD
+		HasVideo:     true,
+		HasAudio:     true,
+		AudioCodec:   "aac",
+		AudioBitrate: 128000,
+	}
+	if got != want {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestParseFFprobeOutput_NoBitRateInStream(t *testing.T) {
+	// When stream-level bit_rate is absent, fall back to format-level.
+	raw := []byte(`{
+		"streams": [
+			{
+				"codec_type": "video",
+				"codec_name": "hevc",
+				"width": 1280,
+				"height": 720,
+				"r_frame_rate": "25/1"
+			}
+		],
+		"format": {
+			"duration": "60.0",
+			"bit_rate": "2000000"
+		}
+	}`)
+
+	got, err := parseFFprobeOutput(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Bitrate != 2000000 {
+		t.Errorf("expected format-level bitrate 2000000, got %d", got.Bitrate)
+	}
+	if got.Framerate != "25/1" {
+		t.Errorf("expected framerate 25/1, got %q", got.Framerate)
+	}
+	if !got.HasVideo {
+		t.Errorf("expected HasVideo=true for video-only stream")
+	}
+	if got.HasAudio {
+		t.Errorf("expected HasAudio=false for video-only stream")
+	}
+	if got.AspectRatio != "16:9" {
+		t.Errorf("expected AspectRatio 16:9 for 1280x720, got %q", got.AspectRatio)
+	}
+}
+
+func TestParseFFprobeOutput_DegenerateFramerate(t *testing.T) {
+	// Degenerate framerate "0/0" must not be stored.
+	raw := []byte(`{
+		"streams": [
+			{
+				"codec_type": "video",
+				"codec_name": "h264",
+				"width": 640,
+				"height": 480,
+				"r_frame_rate": "0/0"
+			}
+		],
+		"format": {"duration": "10.0", "bit_rate": "1000000"}
+	}`)
+
+	got, err := parseFFprobeOutput(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Framerate != "" {
+		t.Errorf("expected empty Framerate for 0/0, got %q", got.Framerate)
+	}
+	if !got.HasVideo {
+		t.Errorf("expected HasVideo=true")
+	}
+	if got.AspectRatio != "4:3" {
+		t.Errorf("expected AspectRatio 4:3 for 640x480, got %q", got.AspectRatio)
+	}
+}
+
+func TestParseFFprobeOutput_NoVideoStream(t *testing.T) {
+	// Audio-only: no video stream means zero width/height/codec/framerate.
+	raw := []byte(`{
+		"streams": [
+			{"codec_type": "audio", "codec_name": "mp3"}
+		],
+		"format": {"duration": "200.0", "bit_rate": "320000"}
+	}`)
+
+	got, err := parseFFprobeOutput(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Width != 0 || got.Height != 0 || got.VideoCodec != "" {
+		t.Errorf("expected zero video fields for audio-only, got %+v", got)
+	}
+	if got.DurationSec != 200.0 {
+		t.Errorf("expected duration 200.0, got %v", got.DurationSec)
+	}
+	if got.HasVideo {
+		t.Errorf("expected HasVideo=false for audio-only")
+	}
+	if !got.HasAudio {
+		t.Errorf("expected HasAudio=true for audio-only")
+	}
+	if got.AudioCodec != "mp3" {
+		t.Errorf("expected AudioCodec mp3, got %q", got.AudioCodec)
 	}
 }

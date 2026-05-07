@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -32,7 +33,7 @@ func Start(q *queue.Queue, s uploader, hlsConfig config.HLSConfig, thumbnailConf
 		}
 
 		log.Printf("processing job %d for video %d", job.ID, job.VideoID)
-		if err := processJob(context.Background(), s, job, hlsConfig, thumbnailConfig); err != nil {
+		if err := processJob(context.Background(), q, s, job, hlsConfig, thumbnailConfig); err != nil {
 			log.Printf("job %d failed: %v", job.ID, err)
 			q.MarkFailed(job.ID, err)
 		} else {
@@ -41,12 +42,25 @@ func Start(q *queue.Queue, s uploader, hlsConfig config.HLSConfig, thumbnailConf
 	}
 }
 
-func processJob(ctx context.Context, s uploader, job *queue.Job, hlsConfig config.HLSConfig, thumbnailConfig config.ThumbnailConfig) error {
+func processJob(ctx context.Context, q *queue.Queue, s uploader, job *queue.Job, hlsConfig config.HLSConfig, thumbnailConfig config.ThumbnailConfig) error {
 	workDir, err := os.MkdirTemp("", fmt.Sprintf("goro-hls-%d-", job.VideoID))
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(workDir)
+
+	// Probe metadata from the original file. Failures are non-fatal: the job
+	// continues and the metadata columns stay NULL until a later attempt.
+	var duration float64
+	meta, err := probeVideoMetadata(ctx, job.InputMP4)
+	if err != nil {
+		log.Printf("probe: failed to get metadata for %s: %v", job.PublicID, err)
+	} else {
+		duration = meta.DurationSec
+		if err := q.UpdateVideoMetadata(job.PublicID, meta); err != nil {
+			log.Printf("probe: failed to save metadata for %s: %v", job.PublicID, err)
+		}
+	}
 
 	for _, profile := range hlsConfig.Profiles {
 		profileDir := filepath.Join(workDir, profile.Name)
@@ -70,7 +84,7 @@ func processJob(ctx context.Context, s uploader, job *queue.Job, hlsConfig confi
 	}
 
 	// Generate and upload thumbnails. Failures are non-fatal.
-	generateAndUploadThumbnails(ctx, s, job.InputMP4, job.PublicID, workDir, thumbnailConfig)
+	generateAndUploadThumbnails(ctx, s, job.InputMP4, job.PublicID, workDir, thumbnailConfig, duration)
 
 	_ = os.RemoveAll(filepath.Dir(job.InputMP4))
 	return nil
@@ -137,20 +151,167 @@ func uploadProfileOutputs(ctx context.Context, s uploader, publicID string, prof
 	return nil
 }
 
-// getVideoDuration uses ffprobe to return the video duration in seconds.
-func getVideoDuration(ctx context.Context, inputPath string) (float64, error) {
+// ffprobeOutput is the top-level structure of ffprobe's JSON output.
+type ffprobeOutput struct {
+	Streams []ffprobeStream `json:"streams"`
+	Format  ffprobeFormat  `json:"format"`
+}
+
+type ffprobeSideData struct {
+	SideDataType string `json:"side_data_type"`
+	Rotation     int    `json:"rotation"`
+}
+
+type ffprobeStreamTags struct {
+	Rotate string `json:"rotate"`
+}
+
+type ffprobeStream struct {
+	CodecType         string            `json:"codec_type"`
+	CodecName         string            `json:"codec_name"`
+	Width             int               `json:"width"`
+	Height            int               `json:"height"`
+	RFrameRate        string            `json:"r_frame_rate"`
+	BitRate           string            `json:"bit_rate"`
+	SampleRate        string            `json:"sample_rate"`
+	Channels          int               `json:"channels"`
+	DisplayAspectRatio string           `json:"display_aspect_ratio"`
+	Tags              ffprobeStreamTags `json:"tags"`
+	SideDataList      []ffprobeSideData `json:"side_data_list"`
+}
+
+type ffprobeFormat struct {
+	Duration   string `json:"duration"`
+	BitRate    string `json:"bit_rate"`
+	FormatName string `json:"format_name"`
+	Size       string `json:"size"`
+}
+
+// probeVideoMetadata runs ffprobe on inputPath and returns extracted metadata.
+func probeVideoMetadata(ctx context.Context, inputPath string) (queue.VideoMetadata, error) {
 	cmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
-		"-show_entries", "format=duration",
-		"-of", "csv=p=0",
+		"-show_streams",
+		"-show_format",
+		"-print_format", "json",
 		inputPath,
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("ffprobe failed: %w", err)
+		return queue.VideoMetadata{}, fmt.Errorf("ffprobe failed: %w", err)
 	}
-	s := strings.TrimSpace(string(out))
-	return strconv.ParseFloat(s, 64)
+	return parseFFprobeOutput(out)
+}
+
+// parseFFprobeOutput parses raw ffprobe JSON output into VideoMetadata.
+// It is kept separate from probeVideoMetadata to allow unit testing without
+// running a real ffprobe binary.
+func parseFFprobeOutput(data []byte) (queue.VideoMetadata, error) {
+	var result ffprobeOutput
+	if err := json.Unmarshal(data, &result); err != nil {
+		return queue.VideoMetadata{}, fmt.Errorf("ffprobe json parse: %w", err)
+	}
+
+	var meta queue.VideoMetadata
+
+	// Duration and total bitrate come from the format section.
+	if result.Format.Duration != "" {
+		var parseErr error
+		meta.DurationSec, parseErr = strconv.ParseFloat(result.Format.Duration, 64)
+		if parseErr != nil {
+			log.Printf("ffprobe: failed to parse duration %q: %v", result.Format.Duration, parseErr)
+		}
+	}
+	if result.Format.BitRate != "" {
+		var parseErr error
+		meta.Bitrate, parseErr = strconv.ParseInt(result.Format.BitRate, 10, 64)
+		if parseErr != nil {
+			log.Printf("ffprobe: failed to parse format bitrate %q: %v", result.Format.BitRate, parseErr)
+		}
+	}
+	if result.Format.FormatName != "" {
+		// format_name may be a comma-separated list (e.g. "mov,mp4,m4a,3gp,3g2,mj2"); take the first.
+		meta.ContainerFormat = strings.SplitN(result.Format.FormatName, ",", 2)[0]
+	}
+	if result.Format.Size != "" {
+		if sz, err := strconv.ParseInt(result.Format.Size, 10, 64); err == nil {
+			meta.FileSize = sz
+		}
+	}
+
+	// Use the first video stream for resolution, codec, framerate, rotation, and aspect ratio.
+	for _, stream := range result.Streams {
+		if stream.CodecType != "video" {
+			continue
+		}
+		meta.HasVideo = true
+		meta.Width = stream.Width
+		meta.Height = stream.Height
+		meta.VideoCodec = stream.CodecName
+		// Prefer stream-level bitrate when available.
+		if stream.BitRate != "" {
+			if br, err := strconv.ParseInt(stream.BitRate, 10, 64); err == nil && br > 0 {
+				meta.Bitrate = br
+			}
+		}
+		// Store the rational framerate string; discard degenerate values.
+		fr := stream.RFrameRate
+		if fr != "" && fr != "0/0" && fr != "0/1" {
+			meta.Framerate = fr
+		}
+		// Aspect ratio: prefer ffprobe's display_aspect_ratio, fall back to GCD computation.
+		if ar := stream.DisplayAspectRatio; ar != "" && ar != "N/A" && ar != "0:1" {
+			meta.AspectRatio = ar
+		} else if stream.Width > 0 && stream.Height > 0 {
+			g := gcd(stream.Width, stream.Height)
+			meta.AspectRatio = fmt.Sprintf("%d:%d", stream.Width/g, stream.Height/g)
+		}
+		// Rotation: prefer side_data "Display Matrix", fall back to tags.rotate.
+		for _, sd := range stream.SideDataList {
+			if sd.SideDataType == "Display Matrix" {
+				// The Display Matrix rotation field is the negation of the visual rotation.
+				meta.Rotation = -sd.Rotation
+				break
+			}
+		}
+		if meta.Rotation == 0 && stream.Tags.Rotate != "" {
+			if r, err := strconv.Atoi(stream.Tags.Rotate); err == nil {
+				meta.Rotation = r
+			}
+		}
+		break
+	}
+
+	// Use the first audio stream for audio metadata.
+	for _, stream := range result.Streams {
+		if stream.CodecType != "audio" {
+			continue
+		}
+		meta.HasAudio = true
+		meta.AudioCodec = stream.CodecName
+		if stream.BitRate != "" {
+			if br, err := strconv.ParseInt(stream.BitRate, 10, 64); err == nil && br > 0 {
+				meta.AudioBitrate = br
+			}
+		}
+		if stream.SampleRate != "" {
+			if sr, err := strconv.Atoi(stream.SampleRate); err == nil {
+				meta.SampleRate = sr
+			}
+		}
+		meta.Channels = stream.Channels
+		break
+	}
+
+	return meta, nil
+}
+
+// gcd returns the greatest common divisor of a and b.
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // thumbnailFilterFrames returns the number of frames to analyse with the ffmpeg
@@ -224,9 +385,10 @@ func generateThumbnail(ctx context.Context, inputPath, workDir string, spec conf
 }
 
 // generateAndUploadThumbnails generates thumbnails for all specs in thumbnailConfig
-// and uploads them to storage.  Individual spec failures are logged but do not
-// fail the overall job.
-func generateAndUploadThumbnails(ctx context.Context, s uploader, inputPath, publicID, workDir string, thumbnailConfig config.ThumbnailConfig) {
+// and uploads them to storage. The caller provides the pre-computed video duration
+// so that a second ffprobe invocation is avoided. Individual spec failures are
+// logged but do not fail the overall job.
+func generateAndUploadThumbnails(ctx context.Context, s uploader, inputPath, publicID, workDir string, thumbnailConfig config.ThumbnailConfig, duration float64) {
 	if len(thumbnailConfig.Specs) == 0 {
 		return
 	}
@@ -234,12 +396,6 @@ func generateAndUploadThumbnails(ctx context.Context, s uploader, inputPath, pub
 	thumbDir := filepath.Join(workDir, "thumbnails")
 	if err := os.MkdirAll(thumbDir, 0o755); err != nil {
 		log.Printf("thumbnail: failed to create work dir for %s: %v", publicID, err)
-		return
-	}
-
-	duration, err := getVideoDuration(ctx, inputPath)
-	if err != nil {
-		log.Printf("thumbnail: failed to get duration for %s: %v", publicID, err)
 		return
 	}
 

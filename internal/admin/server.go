@@ -163,30 +163,206 @@ func (s *Server) Start(addr string) {
 	}
 }
 
-// listVideos returns all videos ordered by created_at descending.
+// listVideos returns videos ordered by created_at descending. The following
+// optional query parameters filter the result set:
+//
+//   - name         – original_name LIKE %value%
+//   - status       – exact match (queued / processing / ready / failed)
+//   - visibility   – exact match (public / private)
+//   - codec        – video_codec LIKE %value%
+//   - duration_min – duration_sec >= value (seconds, float)
+//   - duration_max – duration_sec <= value (seconds, float)
+//   - width_min    – width >= value (pixels)
+//   - width_max    – width <= value (pixels)
+//   - height_min   – height >= value (pixels)
+//   - height_max   – height <= value (pixels)
 func (s *Server) listVideos(c *gin.Context) {
-	rows, err := s.db.QueryContext(c.Request.Context(),
-		`SELECT public_id, original_name, status, visibility, created_at FROM videos ORDER BY created_at DESC`)
+	type videoRow struct {
+		PublicID        string   `json:"public_id"`
+		OriginalName    string   `json:"original_name"`
+		Status          string   `json:"status"`
+		Visibility      string   `json:"visibility"`
+		CreatedAt       string   `json:"created_at"`
+		DurationSec     *float64 `json:"duration_sec,omitempty"`
+		Width           *int     `json:"width,omitempty"`
+		Height          *int     `json:"height,omitempty"`
+		VideoCodec      *string  `json:"video_codec,omitempty"`
+		Bitrate         *int64   `json:"bitrate,omitempty"`
+		Framerate       *string  `json:"framerate,omitempty"`
+		FramerateFloat  *float64 `json:"framerate_float,omitempty"`
+		ContainerFormat *string  `json:"container_format,omitempty"`
+		AudioCodec      *string  `json:"audio_codec,omitempty"`
+		AudioBitrate    *int64   `json:"audio_bitrate,omitempty"`
+		SampleRate      *int     `json:"sample_rate,omitempty"`
+		Channels        *int     `json:"channels,omitempty"`
+		FileSize        *int64   `json:"file_size,omitempty"`
+		AspectRatio     *string  `json:"aspect_ratio,omitempty"`
+		Rotation        *int     `json:"rotation,omitempty"`
+		HasAudio        *bool    `json:"has_audio,omitempty"`
+		HasVideo        *bool    `json:"has_video,omitempty"`
+	}
+
+	base := `SELECT public_id, original_name, status, visibility, created_at,
+		duration_sec, width, height, video_codec, bitrate, framerate,
+		container_format, audio_codec, audio_bitrate, sample_rate, channels,
+		file_size, aspect_ratio, rotation, has_audio, has_video
+		FROM videos`
+
+	var conds []string
+	var args []interface{}
+
+	if v := c.Query("name"); v != "" {
+		conds = append(conds, "original_name LIKE ?")
+		args = append(args, "%"+v+"%")
+	}
+	if v := c.Query("status"); v != "" {
+		conds = append(conds, "status = ?")
+		args = append(args, v)
+	}
+	if v := c.Query("visibility"); v != "" {
+		conds = append(conds, "visibility = ?")
+		args = append(args, v)
+	}
+	if v := c.Query("codec"); v != "" {
+		conds = append(conds, "video_codec LIKE ?")
+		args = append(args, "%"+v+"%")
+	}
+	if v := c.Query("duration_min"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			conds = append(conds, "duration_sec >= ?")
+			args = append(args, f)
+		}
+	}
+	if v := c.Query("duration_max"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			conds = append(conds, "duration_sec <= ?")
+			args = append(args, f)
+		}
+	}
+	if v := c.Query("width_min"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			conds = append(conds, "width >= ?")
+			args = append(args, n)
+		}
+	}
+	if v := c.Query("width_max"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			conds = append(conds, "width <= ?")
+			args = append(args, n)
+		}
+	}
+	if v := c.Query("height_min"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			conds = append(conds, "height >= ?")
+			args = append(args, n)
+		}
+	}
+	if v := c.Query("height_max"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			conds = append(conds, "height <= ?")
+			args = append(args, n)
+		}
+	}
+
+	q := base
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
+	}
+	q += " ORDER BY created_at DESC"
+
+	rows, err := s.db.QueryContext(c.Request.Context(), q, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query videos"})
 		return
 	}
 	defer rows.Close()
 
-	type videoRow struct {
-		PublicID     string `json:"public_id"`
-		OriginalName string `json:"original_name"`
-		Status       string `json:"status"`
-		Visibility   string `json:"visibility"`
-		CreatedAt    string `json:"created_at"`
-	}
-
 	videos := make([]videoRow, 0)
 	for rows.Next() {
 		var v videoRow
-		if err := rows.Scan(&v.PublicID, &v.OriginalName, &v.Status, &v.Visibility, &v.CreatedAt); err != nil {
+		var (
+			durationSec     sql.NullFloat64
+			width           sql.NullInt64
+			height          sql.NullInt64
+			videoCodec      sql.NullString
+			bitrate         sql.NullInt64
+			framerate       sql.NullString
+			containerFormat sql.NullString
+			audioCodec      sql.NullString
+			audioBitrate    sql.NullInt64
+			sampleRate      sql.NullInt64
+			channels        sql.NullInt64
+			fileSize        sql.NullInt64
+			aspectRatio     sql.NullString
+			rotation        sql.NullInt64
+			hasAudio        sql.NullInt64
+			hasVideo        sql.NullInt64
+		)
+		if err := rows.Scan(
+			&v.PublicID, &v.OriginalName, &v.Status, &v.Visibility, &v.CreatedAt,
+			&durationSec, &width, &height, &videoCodec, &bitrate, &framerate,
+			&containerFormat, &audioCodec, &audioBitrate, &sampleRate, &channels,
+			&fileSize, &aspectRatio, &rotation, &hasAudio, &hasVideo,
+		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to scan video"})
 			return
+		}
+		if durationSec.Valid {
+			v.DurationSec = &durationSec.Float64
+		}
+		if width.Valid {
+			w := int(width.Int64)
+			v.Width = &w
+		}
+		if height.Valid {
+			h := int(height.Int64)
+			v.Height = &h
+		}
+		if videoCodec.Valid {
+			v.VideoCodec = &videoCodec.String
+		}
+		if bitrate.Valid {
+			v.Bitrate = &bitrate.Int64
+		}
+		if framerate.Valid {
+			v.Framerate = &framerate.String
+			f := parseRational(framerate.String)
+			v.FramerateFloat = &f
+		}
+		if containerFormat.Valid {
+			v.ContainerFormat = &containerFormat.String
+		}
+		if audioCodec.Valid {
+			v.AudioCodec = &audioCodec.String
+		}
+		if audioBitrate.Valid {
+			v.AudioBitrate = &audioBitrate.Int64
+		}
+		if sampleRate.Valid {
+			sr := int(sampleRate.Int64)
+			v.SampleRate = &sr
+		}
+		if channels.Valid {
+			ch := int(channels.Int64)
+			v.Channels = &ch
+		}
+		if fileSize.Valid {
+			v.FileSize = &fileSize.Int64
+		}
+		if aspectRatio.Valid {
+			v.AspectRatio = &aspectRatio.String
+		}
+		if rotation.Valid {
+			r := int(rotation.Int64)
+			v.Rotation = &r
+		}
+		if hasAudio.Valid {
+			ha := hasAudio.Int64 != 0
+			v.HasAudio = &ha
+		}
+		if hasVideo.Valid {
+			hv := hasVideo.Int64 != 0
+			v.HasVideo = &hv
 		}
 		videos = append(videos, v)
 	}
@@ -196,6 +372,23 @@ func (s *Server) listVideos(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"videos": videos})
+}
+
+// parseRational converts a rational framerate string (e.g. "30000/1001") to a
+// float64 rounded to two decimal places. Non-rational strings are parsed as
+// plain floats.
+func parseRational(r string) float64 {
+	parts := strings.SplitN(r, "/", 2)
+	if len(parts) != 2 {
+		f, _ := strconv.ParseFloat(r, 64)
+		return f
+	}
+	num, _ := strconv.ParseFloat(parts[0], 64)
+	den, _ := strconv.ParseFloat(parts[1], 64)
+	if den == 0 {
+		return 0
+	}
+	return num / den
 }
 
 // uploadVideo saves an uploaded .mp4 to a temp dir and enqueues an encoding job.

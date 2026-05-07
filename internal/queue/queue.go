@@ -127,6 +127,93 @@ func (q *Queue) MarkDone(id int64) {
 	}
 }
 
+// VideoMetadata holds extracted technical properties of an uploaded video.
+type VideoMetadata struct {
+	DurationSec     float64
+	Width           int
+	Height          int
+	VideoCodec      string
+	Bitrate         int64  // bits per second (format-level)
+	Framerate       string // rational string e.g. "30000/1001"; empty if unknown
+	ContainerFormat string // e.g. "mov", "matroska"
+	AudioCodec      string
+	AudioBitrate    int64 // bits per second (audio stream)
+	SampleRate      int   // Hz
+	Channels        int   // number of audio channels
+	FileSize        int64 // bytes
+	AspectRatio     string // e.g. "16:9"
+	Rotation        int   // degrees, e.g. 90
+	HasAudio        bool
+	HasVideo        bool
+}
+
+// UpdateVideoMetadata stores extracted metadata on a video row.
+func (q *Queue) UpdateVideoMetadata(publicID string, meta VideoMetadata) error {
+	var framerate interface{}
+	if meta.Framerate != "" {
+		framerate = meta.Framerate
+	}
+	var containerFormat interface{}
+	if meta.ContainerFormat != "" {
+		containerFormat = meta.ContainerFormat
+	}
+	var audioCodec interface{}
+	if meta.AudioCodec != "" {
+		audioCodec = meta.AudioCodec
+	}
+	var audioBitrate interface{}
+	if meta.AudioBitrate > 0 {
+		audioBitrate = meta.AudioBitrate
+	}
+	var sampleRate interface{}
+	if meta.SampleRate > 0 {
+		sampleRate = meta.SampleRate
+	}
+	var channels interface{}
+	if meta.Channels > 0 {
+		channels = meta.Channels
+	}
+	var fileSize interface{}
+	if meta.FileSize > 0 {
+		fileSize = meta.FileSize
+	}
+	var aspectRatio interface{}
+	if meta.AspectRatio != "" {
+		aspectRatio = meta.AspectRatio
+	}
+	hasAudio := 0
+	if meta.HasAudio {
+		hasAudio = 1
+	}
+	hasVideo := 0
+	if meta.HasVideo {
+		hasVideo = 1
+	}
+	_, err := q.db.Exec(`
+		UPDATE videos
+		SET duration_sec     = ?,
+		    width            = ?,
+		    height           = ?,
+		    video_codec      = ?,
+		    bitrate          = ?,
+		    framerate        = ?,
+		    container_format = ?,
+		    audio_codec      = ?,
+		    audio_bitrate    = ?,
+		    sample_rate      = ?,
+		    channels         = ?,
+		    file_size        = ?,
+		    aspect_ratio     = ?,
+		    rotation         = ?,
+		    has_audio        = ?,
+		    has_video        = ?
+		WHERE public_id      = ?`,
+		meta.DurationSec, meta.Width, meta.Height, meta.VideoCodec, meta.Bitrate, framerate,
+		containerFormat, audioCodec, audioBitrate, sampleRate, channels, fileSize, aspectRatio, meta.Rotation,
+		hasAudio, hasVideo, publicID)
+	return err
+}
+
 func (q *Queue) MarkFailed(id int64, failureErr error) {
 	tx, err := q.db.Begin()
 	if err != nil {
