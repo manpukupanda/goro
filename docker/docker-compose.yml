@@ -32,6 +32,7 @@ services:
     image: nginx
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template
+      - nginx_cache:/var/cache/nginx
     ports:
       - "80:80"
     environment:
@@ -54,3 +55,4 @@ volumes:
   goro-go-build-cache:
   goro-go-mod-cache:
   minio_data:
+  nginx_cache:
