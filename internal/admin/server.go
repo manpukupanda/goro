@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -562,9 +563,19 @@ func (s *Server) downloadVideo(c *gin.Context) {
 	}
 	defer rc.Close()
 
+	asciiName := strings.Map(func(r rune) rune {
+		if r > 127 || r == '"' || r == '\\' {
+			return -1
+		}
+		return r
+	}, originalName)
+	if asciiName == "" {
+		asciiName = "video.mp4"
+	}
+
 	c.Header("Content-Type", "video/mp4")
 	c.Header("Content-Length", strconv.FormatInt(size, 10))
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, originalName))
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, url.PathEscape(originalName)))
 	c.Status(http.StatusOK)
 	if _, err := io.Copy(c.Writer, rc); err != nil {
 		log.Printf("admin: error streaming mp4 %s: %v", objectName, err)
