@@ -13,6 +13,7 @@ func TestBuildFFmpegArgsIncludesProfileSettings(t *testing.T) {
 	profileDir := filepath.Join(t.TempDir(), "720p")
 	profile := config.HLSProfile{
 		Name:           "720p",
+		Format:         config.ProfileFormatHLSTS,
 		Width:          1280,
 		Height:         720,
 		VideoBitrate:   "2800k",
@@ -34,6 +35,78 @@ func TestBuildFFmpegArgsIncludesProfileSettings(t *testing.T) {
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected ffmpeg args to contain %q, got %q", expected, joined)
+		}
+	}
+}
+
+func TestBuildFFmpegArgsForHLSFMP4(t *testing.T) {
+	profileDir := filepath.Join(t.TempDir(), "720p")
+	profile := config.HLSProfile{
+		Name:           "720p",
+		Format:         config.ProfileFormatHLSFMP4,
+		Width:          1280,
+		Height:         720,
+		VideoBitrate:   "2800k",
+		AudioBitrate:   "128k",
+		SegmentSeconds: 4,
+	}
+
+	args := buildFFmpegArgs("/tmp/input.mp4", profile, profileDir)
+	joined := strings.Join(args, " ")
+
+	for _, expected := range []string{
+		"-hls_segment_type fmp4",
+		"-hls_fmp4_init_filename init.mp4",
+		filepath.Join(profileDir, "segment%03d.m4s"),
+		filepath.Join(profileDir, "index.m3u8"),
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected ffmpeg args to contain %q, got %q", expected, joined)
+		}
+	}
+}
+
+func TestBuildFFmpegArgsForDASHFMP4(t *testing.T) {
+	profileDir := filepath.Join(t.TempDir(), "720p")
+	profile := config.HLSProfile{
+		Name:           "720p",
+		Format:         config.ProfileFormatDASHFMP4,
+		Width:          1280,
+		Height:         720,
+		VideoBitrate:   "2800k",
+		AudioBitrate:   "128k",
+		SegmentSeconds: 4,
+	}
+
+	args := buildFFmpegArgs("/tmp/input.mp4", profile, profileDir)
+	joined := strings.Join(args, " ")
+
+	for _, expected := range []string{
+		"-f dash",
+		"-seg_duration 4",
+		"-use_template 0",
+		"-use_timeline 0",
+		filepath.Join(profileDir, "index.mpd"),
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected ffmpeg args to contain %q, got %q", expected, joined)
+		}
+	}
+}
+
+func TestContentTypeForStreamingOutput(t *testing.T) {
+	cases := map[string]string{
+		".m3u8": "application/vnd.apple.mpegurl",
+		".ts":   "video/mp2t",
+		".mpd":  "application/dash+xml",
+		".m4s":  "video/iso.segment",
+		".mp4":  "video/mp4",
+		".bin":  "",
+	}
+
+	for ext, want := range cases {
+		if got := contentTypeForStreamingOutput(ext); got != want {
+			t.Fatalf("contentTypeForStreamingOutput(%q) = %q, want %q", ext, got, want)
 		}
 	}
 }

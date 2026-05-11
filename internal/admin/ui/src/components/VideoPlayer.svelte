@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onDestroy } from 'svelte';
   import Hls from 'hls.js';
   import { api } from '../lib/api.js';
   import { authHeader } from '../lib/auth.js';
@@ -9,21 +9,61 @@
   let selectedProfile = $state(profiles[0]?.name ?? '');
   let videoEl = $state(null);
   let hls = null;
+  let dash = null;
   let error = $state('');
 
-  function buildPlaylistURL(profile) {
-    const base = api.getPlaylistURL(video.public_id, profile);
-    // No query-param token needed — the HLS XHR loader injects the
-    // Authorization header directly (see xhrSetup below).
-    return base;
+  function selectedProfileConfig(profileName) {
+    return profiles.find((profile) => profile.name === profileName);
   }
 
-  function loadVideo(profile) {
+  function destroyPlayers() {
+    if (hls) { hls.destroy(); hls = null; }
+    if (dash) { dash.reset(); dash = null; }
+  }
+
+  async function loadVideo(profileName) {
     if (!videoEl) return;
     error = '';
-    if (hls) { hls.destroy(); hls = null; }
+    destroyPlayers();
 
-    const src = buildPlaylistURL(profile);
+    const profile = selectedProfileConfig(profileName);
+    if (!profile) {
+      error = 'Profile configuration not found';
+      return;
+    }
+
+    const src = api.getStreamURL(video.public_id, profile.name, profile.format);
+    if (profile.format === 'dash_fmp4') {
+      import('dashjs').then((module) => {
+        if (!videoEl) return;
+        const dashjs = module?.default?.MediaPlayer ? module.default : module;
+        const mediaPlayer = dashjs?.MediaPlayer;
+        if (!mediaPlayer) {
+          throw new Error('Failed to load dash.js module');
+        }
+        dash = mediaPlayer().create();
+        dash.extend('RequestModifier', () => ({
+          modifyRequestURL(url) {
+            return url;
+          },
+          modifyRequestHeader(xhr) {
+            const headers = authHeader();
+            for (const [key, value] of Object.entries(headers)) {
+              xhr.setRequestHeader(key, value);
+            }
+            return xhr;
+          },
+        }), true);
+        dash.on(mediaPlayer.events.ERROR, (evt) => {
+          error = `DASH error: ${evt?.error?.message ?? 'Playback failed'}`;
+        });
+        dash.initialize(videoEl, src, true);
+      }).catch((err) => {
+        error = `Failed to initialize DASH player: ${err.message}`;
+      });
+      return;
+    }
+
     if (Hls.isSupported()) {
       hls = new Hls({
         xhrSetup(xhr) {
@@ -35,13 +75,13 @@
       hls.attachMedia(videoEl);
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (data.fatal) {
-          error = `HLS エラー: ${data.type} / ${data.details}`;
+          error = `HLS error: ${data.type} / ${data.details}`;
         }
       });
     } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
       videoEl.src = src;
     } else {
-      error = 'このブラウザは HLS 再生に対応していません';
+      error = 'This browser does not support HLS playback';
     }
   }
 
@@ -52,7 +92,7 @@
   });
 
   onDestroy(() => {
-    if (hls) hls.destroy();
+    destroyPlayers();
   });
 </script>
 
@@ -67,7 +107,7 @@
       <p class="error">{error}</p>
     {/if}
     <div class="profile-select">
-      <label>プロファイル:
+      <label>Profile:
         <select bind:value={selectedProfile} onchange={() => loadVideo(selectedProfile)}>
           {#each profiles as p}
             <option value={p.name}>{p.name}</option>

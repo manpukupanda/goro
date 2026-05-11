@@ -309,7 +309,7 @@
               <td class="thumb-cell">
                 {#if v.status === 'ready' && thumbnailSpecs.length > 0}
                   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-                  <div class="thumb-preview" onclick={() => { thumbnailVideo = v; }} title="クリックで拡大">
+                  <div class="thumb-preview" onclick={() => { thumbnailVideo = v; }} title="Click to enlarge">
                     <ThumbnailImage
                       videoId={v.public_id}
                       specName={thumbnailSpecs[0]}

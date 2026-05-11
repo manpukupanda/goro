@@ -1,9 +1,12 @@
 package admin
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -83,9 +87,11 @@ func (s *Server) Router() *gin.Engine {
 		api.PUT("/videos/:id/visibility", s.setVisibility)
 		api.DELETE("/videos/:id", s.deleteVideo)
 		api.GET("/videos/:id/playlist", s.getPlaylist)
+		api.GET("/videos/:id/manifest", s.getManifest)
 		api.GET("/videos/:id/download", s.downloadVideo)
 		api.GET("/videos/:id/thumbnails/:name", s.getThumbnail)
-		api.GET("/hls/:id/:profile/:segment", s.getSegment)
+		api.GET("/hls/:id/:profile/*asset", s.getHLSAsset)
+		api.GET("/dash/:id/:profile/*asset", s.getDASHAsset)
 		api.GET("/jobs", s.listJobs)
 		api.GET("/config", s.getConfig)
 	}
@@ -162,6 +168,24 @@ func (s *Server) Start(addr string) {
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("admin console server error: %v", err)
 	}
+}
+
+func (s *Server) resolveProfile(requested string, allow func(config.ProfileFormat) bool) (config.HLSProfile, bool) {
+	if requested != "" {
+		for _, profile := range s.hlsConfig.Profiles {
+			if profile.Name == requested && allow(profile.EffectiveFormat()) {
+				return profile, true
+			}
+		}
+		return config.HLSProfile{}, false
+	}
+
+	for _, profile := range s.hlsConfig.Profiles {
+		if allow(profile.EffectiveFormat()) {
+			return profile, true
+		}
+	}
+	return config.HLSProfile{}, false
 }
 
 // listVideos returns videos ordered by created_at descending. The following
@@ -511,16 +535,15 @@ func (s *Server) setVisibility(c *gin.Context) {
 // segments are also proxied through the admin API).
 func (s *Server) getPlaylist(c *gin.Context) {
 	id := c.Param("id")
-	profile := c.Query("profile")
-	if profile == "" && len(s.hlsConfig.Profiles) > 0 {
-		profile = s.hlsConfig.Profiles[0].Name
-	}
-	if profile == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile query parameter is required"})
+	profile, ok := s.resolveProfile(c.Query("profile"), func(format config.ProfileFormat) bool {
+		return format.IsHLS()
+	})
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid hls profile is required"})
 		return
 	}
 
-	objectName := fmt.Sprintf("videos/%s/%s/index.m3u8", id, profile)
+	objectName := fmt.Sprintf("videos/%s/%s/index.m3u8", id, profile.Name)
 	rc, _, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "playlist not found"})
@@ -529,13 +552,41 @@ func (s *Server) getPlaylist(c *gin.Context) {
 	defer rc.Close()
 
 	// Rewrite segment lines to point to the admin HLS proxy endpoint.
-	out, err := rewriteAdminPlaylist(rc, id, profile)
+	out, err := rewriteAdminPlaylist(rc, id, profile.Name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process playlist"})
 		return
 	}
 
 	c.Header("Content-Type", "application/vnd.apple.mpegurl")
+	c.String(http.StatusOK, out)
+}
+
+func (s *Server) getManifest(c *gin.Context) {
+	id := c.Param("id")
+	profile, ok := s.resolveProfile(c.Query("profile"), func(format config.ProfileFormat) bool {
+		return format.IsDASH()
+	})
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid dash profile is required"})
+		return
+	}
+
+	objectName := fmt.Sprintf("videos/%s/%s/index.mpd", id, profile.Name)
+	rc, _, err := s.storage.GetObject(c.Request.Context(), objectName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "manifest not found"})
+		return
+	}
+	defer rc.Close()
+
+	out, err := rewriteAdminManifest(rc, id, profile.Name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process manifest"})
+		return
+	}
+
+	c.Header("Content-Type", "application/dash+xml")
 	c.String(http.StatusOK, out)
 }
 
@@ -582,26 +633,38 @@ func (s *Server) downloadVideo(c *gin.Context) {
 	}
 }
 
-// getSegment streams a single .ts HLS segment directly from storage.
-// This is used by the admin player which cannot access the nginx secure-link URLs.
-func (s *Server) getSegment(c *gin.Context) {
+// getHLSAsset streams a single HLS asset directly from storage.
+func (s *Server) getHLSAsset(c *gin.Context) {
+	s.getStreamingAsset(c)
+}
+
+// getDASHAsset streams a single DASH asset directly from storage.
+func (s *Server) getDASHAsset(c *gin.Context) {
+	s.getStreamingAsset(c)
+}
+
+func (s *Server) getStreamingAsset(c *gin.Context) {
 	id := c.Param("id")
 	profile := c.Param("profile")
-	segment := c.Param("segment")
+	asset := strings.TrimPrefix(c.Param("asset"), "/")
+	if asset == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
+		return
+	}
 
-	objectName := fmt.Sprintf("videos/%s/%s/%s", id, profile, segment)
+	objectName := fmt.Sprintf("videos/%s/%s/%s", id, profile, asset)
 	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "segment not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
 		return
 	}
 	defer rc.Close()
 
-	c.Header("Content-Type", "video/mp2t")
+	c.Header("Content-Type", streamingContentType(asset))
 	c.Header("Content-Length", strconv.FormatInt(size, 10))
 	c.Status(http.StatusOK)
 	if _, err := io.Copy(c.Writer, rc); err != nil {
-		log.Printf("admin: error streaming segment %s: %v", objectName, err)
+		log.Printf("admin: error streaming asset %s: %v", objectName, err)
 	}
 }
 
@@ -650,13 +713,14 @@ ORDER BY j.created_at DESC
 // the SPA knows which thumbnails to display.
 func (s *Server) getConfig(c *gin.Context) {
 	type profile struct {
-		Name   string `json:"name"`
-		Width  int    `json:"width"`
-		Height int    `json:"height"`
+		Name   string               `json:"name"`
+		Format config.ProfileFormat `json:"format"`
+		Width  int                  `json:"width"`
+		Height int                  `json:"height"`
 	}
 	profiles := make([]profile, 0, len(s.hlsConfig.Profiles))
 	for _, p := range s.hlsConfig.Profiles {
-		profiles = append(profiles, profile{Name: p.Name, Width: p.Width, Height: p.Height})
+		profiles = append(profiles, profile{Name: p.Name, Format: p.EffectiveFormat(), Width: p.Width, Height: p.Height})
 	}
 
 	thumbNames := make([]string, 0, len(s.thumbnailConfig.Specs))
@@ -688,25 +752,121 @@ func (s *Server) getThumbnail(c *gin.Context) {
 	}
 }
 
-// rewriteAdminPlaylist rewrites an m3u8 playlist so that each segment line
-// references the admin proxy endpoint (/admin/api/hls/:id/:profile/:segment)
-// rather than a bare filename, allowing hls.js to fetch segments through the
-// admin API with Basic Auth.
+var adminExtXMapURIRegexp = regexp.MustCompile(`URI="([^"]+)"`)
+
+// rewriteAdminPlaylist rewrites an m3u8 playlist so that each segment and init
+// reference points to the admin proxy endpoint.
 func rewriteAdminPlaylist(r io.Reader, videoID, profile string) (string, error) {
 	var sb strings.Builder
-	all, err := io.ReadAll(io.LimitReader(r, 1<<20)) // 1 MiB limit
-	if err != nil {
-		return "", err
-	}
-
-	for _, line := range strings.Split(string(all), "\n") {
+	scanner := bufio.NewScanner(io.LimitReader(r, 1<<20))
+	for scanner.Scan() {
+		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		switch {
+		case strings.HasPrefix(trimmed, "#EXT-X-MAP:"):
+			match := adminExtXMapURIRegexp.FindStringSubmatch(line)
+			if len(match) == 2 {
+				line = strings.Replace(line, match[1], adminAssetURL("/admin/api/hls", videoID, profile, match[1]), 1)
+			}
 			sb.WriteString(line)
-		} else {
-			sb.WriteString(fmt.Sprintf("/admin/api/hls/%s/%s/%s", videoID, profile, trimmed))
+		case trimmed == "" || strings.HasPrefix(trimmed, "#"):
+			sb.WriteString(line)
+		default:
+			sb.WriteString(adminAssetURL("/admin/api/hls", videoID, profile, trimmed))
 		}
 		sb.WriteByte('\n')
 	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
 	return sb.String(), nil
+}
+
+func rewriteAdminManifest(r io.Reader, videoID, profile string) (string, error) {
+	decoder := xml.NewDecoder(io.LimitReader(r, 1<<20))
+	var buf bytes.Buffer
+	encoder := xml.NewEncoder(&buf)
+	inBaseURL := false
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			if t.Name.Local == "BaseURL" {
+				inBaseURL = true
+			}
+			for i, attr := range t.Attr {
+				switch attr.Name.Local {
+				case "sourceURL", "media", "initialization", "href":
+					t.Attr[i].Value = adminAssetURL("/admin/api/dash", videoID, profile, attr.Value)
+				}
+			}
+			if err := encoder.EncodeToken(t); err != nil {
+				return "", err
+			}
+		case xml.EndElement:
+			if t.Name.Local == "BaseURL" {
+				inBaseURL = false
+			}
+			if err := encoder.EncodeToken(t); err != nil {
+				return "", err
+			}
+		case xml.CharData:
+			if inBaseURL {
+				t = xml.CharData([]byte(adminAssetURL("/admin/api/dash", videoID, profile, string(t))))
+			}
+			if err := encoder.EncodeToken(t); err != nil {
+				return "", err
+			}
+		default:
+			if err := encoder.EncodeToken(token); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	if err := encoder.Flush(); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+func adminAssetURL(routePrefix, videoID, profile, asset string) string {
+	trimmed := strings.TrimSpace(asset)
+	if trimmed == "" ||
+		trimmed == "." ||
+		trimmed == "./" ||
+		strings.HasPrefix(trimmed, "http://") ||
+		strings.HasPrefix(trimmed, "https://") ||
+		strings.HasPrefix(trimmed, "data:") ||
+		strings.HasPrefix(trimmed, "/") {
+		return asset
+	}
+
+	trimmed = strings.TrimPrefix(trimmed, "./")
+	return fmt.Sprintf("%s/%s/%s/%s", routePrefix, videoID, profile, trimmed)
+}
+
+func streamingContentType(name string) string {
+	switch filepath.Ext(name) {
+	case ".m3u8":
+		return "application/vnd.apple.mpegurl"
+	case ".ts":
+		return "video/mp2t"
+	case ".mpd":
+		return "application/dash+xml"
+	case ".m4s":
+		return "video/iso.segment"
+	case ".mp4":
+		return "video/mp4"
+	default:
+		return "application/octet-stream"
+	}
 }

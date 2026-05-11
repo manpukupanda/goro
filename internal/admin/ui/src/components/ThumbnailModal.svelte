@@ -10,7 +10,7 @@
 <div class="overlay" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
   <div class="modal">
     <div class="modal-header">
-      <h2>サムネイル — {video.original_name}</h2>
+      <h2>Thumbnails — {video.original_name}</h2>
       <button class="close-btn" onclick={onClose}>✕</button>
     </div>
 
@@ -24,12 +24,12 @@
           alt={enlarged}
         />
         <p class="spec-label">{enlarged}</p>
-        <button class="btn-back" onclick={() => { enlarged = null; }}>← 一覧に戻る</button>
+        <button class="btn-back" onclick={() => { enlarged = null; }}>← Back to list</button>
       </div>
     {:else}
       <!-- Thumbnail grid -->
       {#if thumbnailSpecs.length === 0}
-        <p class="muted">サムネイルの設定がありません。</p>
+        <p class="muted">No thumbnail presets configured.</p>
       {:else}
         <div class="grid">
           {#each thumbnailSpecs as spec}
@@ -37,7 +37,7 @@
             <div
               class="thumb-card"
               onclick={() => { enlarged = spec; }}
-              title="クリックで拡大"
+              title="Click to enlarge"
             >
               <ThumbnailImage
                 videoId={video.public_id}

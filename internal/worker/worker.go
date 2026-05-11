@@ -101,10 +101,7 @@ func runFFmpeg(ctx context.Context, inputPath string, profile config.HLSProfile,
 }
 
 func buildFFmpegArgs(inputPath string, profile config.HLSProfile, profileDir string) []string {
-	playlistPath := filepath.Join(profileDir, "index.m3u8")
-	segmentPath := filepath.Join(profileDir, "segment%03d.ts")
-
-	return []string{
+	commonArgs := []string{
 		"-y",
 		"-i", inputPath,
 		"-vf", fmt.Sprintf("scale=%d:%d", profile.Width, profile.Height),
@@ -112,10 +109,38 @@ func buildFFmpegArgs(inputPath string, profile config.HLSProfile, profileDir str
 		"-b:v", profile.VideoBitrate,
 		"-c:a", "aac",
 		"-b:a", profile.AudioBitrate,
-		"-hls_time", strconv.Itoa(profile.SegmentSeconds),
-		"-hls_playlist_type", "vod",
-		"-hls_segment_filename", segmentPath,
-		playlistPath,
+	}
+
+	switch profile.EffectiveFormat() {
+	case config.ProfileFormatHLSTS:
+		playlistPath := filepath.Join(profileDir, "index.m3u8")
+		segmentPath := filepath.Join(profileDir, "segment%03d.ts")
+		return append(commonArgs,
+			"-hls_time", strconv.Itoa(profile.SegmentSeconds),
+			"-hls_playlist_type", "vod",
+			"-hls_segment_filename", segmentPath,
+			playlistPath,
+		)
+	case config.ProfileFormatDASHFMP4:
+		manifestPath := filepath.Join(profileDir, "index.mpd")
+		return append(commonArgs,
+			"-f", "dash",
+			"-seg_duration", strconv.Itoa(profile.SegmentSeconds),
+			"-use_template", "0",
+			"-use_timeline", "0",
+			manifestPath,
+		)
+	default:
+		playlistPath := filepath.Join(profileDir, "index.m3u8")
+		segmentPath := filepath.Join(profileDir, "segment%03d.m4s")
+		return append(commonArgs,
+			"-hls_time", strconv.Itoa(profile.SegmentSeconds),
+			"-hls_playlist_type", "vod",
+			"-hls_segment_type", "fmp4",
+			"-hls_fmp4_init_filename", "init.mp4",
+			"-hls_segment_filename", segmentPath,
+			playlistPath,
+		)
 	}
 }
 
@@ -134,13 +159,9 @@ func uploadProfileOutputs(ctx context.Context, s uploader, publicID string, prof
 		objectPath := fmt.Sprintf("videos/%s/%s/%s", publicID, profileName, filename)
 
 		ext := filepath.Ext(filename)
-		contentType := mime.TypeByExtension(ext)
-
-		switch ext {
-		case ".m3u8":
-			contentType = "application/vnd.apple.mpegurl"
-		case ".ts":
-			contentType = "video/mp2t"
+		contentType := contentTypeForStreamingOutput(ext)
+		if contentType == "" {
+			contentType = mime.TypeByExtension(ext)
 		}
 
 		if err := s.UploadFile(ctx, objectPath, filePath, contentType); err != nil {
@@ -151,10 +172,27 @@ func uploadProfileOutputs(ctx context.Context, s uploader, publicID string, prof
 	return nil
 }
 
+func contentTypeForStreamingOutput(ext string) string {
+	switch ext {
+	case ".m3u8":
+		return "application/vnd.apple.mpegurl"
+	case ".ts":
+		return "video/mp2t"
+	case ".mpd":
+		return "application/dash+xml"
+	case ".m4s":
+		return "video/iso.segment"
+	case ".mp4":
+		return "video/mp4"
+	default:
+		return ""
+	}
+}
+
 // ffprobeOutput is the top-level structure of ffprobe's JSON output.
 type ffprobeOutput struct {
 	Streams []ffprobeStream `json:"streams"`
-	Format  ffprobeFormat  `json:"format"`
+	Format  ffprobeFormat   `json:"format"`
 }
 
 type ffprobeSideData struct {
@@ -167,17 +205,17 @@ type ffprobeStreamTags struct {
 }
 
 type ffprobeStream struct {
-	CodecType         string            `json:"codec_type"`
-	CodecName         string            `json:"codec_name"`
-	Width             int               `json:"width"`
-	Height            int               `json:"height"`
-	RFrameRate        string            `json:"r_frame_rate"`
-	BitRate           string            `json:"bit_rate"`
-	SampleRate        string            `json:"sample_rate"`
-	Channels          int               `json:"channels"`
-	DisplayAspectRatio string           `json:"display_aspect_ratio"`
-	Tags              ffprobeStreamTags `json:"tags"`
-	SideDataList      []ffprobeSideData `json:"side_data_list"`
+	CodecType          string            `json:"codec_type"`
+	CodecName          string            `json:"codec_name"`
+	Width              int               `json:"width"`
+	Height             int               `json:"height"`
+	RFrameRate         string            `json:"r_frame_rate"`
+	BitRate            string            `json:"bit_rate"`
+	SampleRate         string            `json:"sample_rate"`
+	Channels           int               `json:"channels"`
+	DisplayAspectRatio string            `json:"display_aspect_ratio"`
+	Tags               ffprobeStreamTags `json:"tags"`
+	SideDataList       []ffprobeSideData `json:"side_data_list"`
 }
 
 type ffprobeFormat struct {

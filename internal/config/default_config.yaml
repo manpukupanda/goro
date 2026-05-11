@@ -37,18 +37,21 @@ thumbnails:
 hls:
   profiles:
     - name: 1080p
+      format: hls_fmp4
       width: 1920
       height: 1080
       video_bitrate: 5000k
       audio_bitrate: 192k
       segment_seconds: 4
     - name: 720p
+      format: hls_fmp4
       width: 1280
       height: 720
       video_bitrate: 2800k
       audio_bitrate: 128k
       segment_seconds: 4
     - name: 480p
+      format: hls_fmp4
       width: 854
       height: 480
       video_bitrate: 1200k

@@ -2,11 +2,13 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -52,7 +55,9 @@ func (s *Server) Router() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	r.GET("/videos/:id/playlist", s.getPlaylist)
-	r.GET("/hls/videos/:id/:profile/:segment", s.getSegment)
+	r.GET("/videos/:id/manifest", s.getManifest)
+	r.GET("/hls/videos/:id/:profile/*asset", s.getHLSAsset)
+	r.GET("/dash/videos/:id/:profile/*asset", s.getDASHAsset)
 
 	// All routes below require a valid API key.
 	auth := r.Group("/", s.requireAPIKey)
@@ -314,6 +319,24 @@ func parseRational(r string) float64 {
 	return num / den
 }
 
+func (s *Server) resolveProfile(requested string, allow func(config.ProfileFormat) bool) (config.HLSProfile, bool) {
+	if requested != "" {
+		for _, profile := range s.hlsConfig.Profiles {
+			if profile.Name == requested && allow(profile.EffectiveFormat()) {
+				return profile, true
+			}
+		}
+		return config.HLSProfile{}, false
+	}
+
+	for _, profile := range s.hlsConfig.Profiles {
+		if allow(profile.EffectiveFormat()) {
+			return profile, true
+		}
+	}
+	return config.HLSProfile{}, false
+}
+
 func (s *Server) uploadVideo(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -361,16 +384,15 @@ func (s *Server) getPlaylist(c *gin.Context) {
 		}
 	}
 
-	profile := c.Query("profile")
-	if profile == "" && len(s.hlsConfig.Profiles) > 0 {
-		profile = s.hlsConfig.Profiles[0].Name
-	}
-	if profile == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile query parameter is required"})
+	profile, ok := s.resolveProfile(c.Query("profile"), func(format config.ProfileFormat) bool {
+		return format.IsHLS()
+	})
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid hls profile is required"})
 		return
 	}
 
-	objectName := fmt.Sprintf("videos/%s/%s/index.m3u8", id, profile)
+	objectName := fmt.Sprintf("videos/%s/%s/index.m3u8", id, profile.Name)
 	rc, _, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "playlist not found"})
@@ -379,13 +401,51 @@ func (s *Server) getPlaylist(c *gin.Context) {
 	defer rc.Close()
 
 	expires := time.Now().Unix() + int64(s.secureLink.TTLSec)
-	out, err := rewritePlaylist(rc, id, profile, expires, s.secureLink.Secret)
+	out, err := rewritePlaylist(rc, id, profile.Name, expires, s.secureLink.Secret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process playlist"})
 		return
 	}
 
 	c.Header("Content-Type", "application/vnd.apple.mpegurl")
+	c.String(http.StatusOK, out)
+}
+
+// getManifest fetches the DASH MPD for a video from storage, rewrites segment
+// references with secure-link signed URLs, and returns the modified manifest.
+func (s *Server) getManifest(c *gin.Context) {
+	id := c.Param("id")
+
+	if s.db != nil {
+		if err := s.authorizePlaylist(c, id); err != nil {
+			return
+		}
+	}
+
+	profile, ok := s.resolveProfile(c.Query("profile"), func(format config.ProfileFormat) bool {
+		return format.IsDASH()
+	})
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid dash profile is required"})
+		return
+	}
+
+	objectName := fmt.Sprintf("videos/%s/%s/index.mpd", id, profile.Name)
+	rc, _, err := s.storage.GetObject(c.Request.Context(), objectName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "manifest not found"})
+		return
+	}
+	defer rc.Close()
+
+	expires := time.Now().Unix() + int64(s.secureLink.TTLSec)
+	out, err := rewriteManifest(rc, id, profile.Name, expires, s.secureLink.Secret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process manifest"})
+		return
+	}
+
+	c.Header("Content-Type", "application/dash+xml")
 	c.String(http.StatusOK, out)
 }
 
@@ -564,21 +624,27 @@ func (s *Server) issueToken(c *gin.Context) {
 	})
 }
 
-// rewritePlaylist reads an m3u8 from r and returns it with each segment line
-// replaced by a secure-link signed path.
+var extXMapURIRegexp = regexp.MustCompile(`URI="([^"]+)"`)
+
+// rewritePlaylist reads an m3u8 from r and returns it with each segment and
+// init reference replaced by a secure-link signed path.
 func rewritePlaylist(r io.Reader, videoID, profile string, expires int64, secret string) (string, error) {
 	var sb strings.Builder
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		switch {
+		case strings.HasPrefix(trimmed, "#EXT-X-MAP:"):
+			match := extXMapURIRegexp.FindStringSubmatch(line)
+			if len(match) == 2 {
+				line = strings.Replace(line, match[1], secureAssetURL("/hls/videos", videoID, profile, match[1], expires, secret), 1)
+			}
 			sb.WriteString(line)
-		} else {
-			// Segment filename (e.g. segment000.ts)
-			uri := fmt.Sprintf("/hls/videos/%s/%s/%s", videoID, profile, trimmed)
-			sig := computeSecureLinkMD5(expires, uri, secret)
-			sb.WriteString(fmt.Sprintf("%s?expires=%d&md5=%s", uri, expires, sig))
+		case trimmed == "" || strings.HasPrefix(trimmed, "#"):
+			sb.WriteString(line)
+		default:
+			sb.WriteString(secureAssetURL("/hls/videos", videoID, profile, trimmed, expires, secret))
 		}
 		sb.WriteByte('\n')
 	}
@@ -586,6 +652,82 @@ func rewritePlaylist(r io.Reader, videoID, profile string, expires int64, secret
 		return "", err
 	}
 	return sb.String(), nil
+}
+
+// rewriteManifest reads a DASH MPD and rewrites relative asset references to
+// secure-link signed asset URLs.
+func rewriteManifest(r io.Reader, videoID, profile string, expires int64, secret string) (string, error) {
+	decoder := xml.NewDecoder(r)
+	var buf bytes.Buffer
+	encoder := xml.NewEncoder(&buf)
+	inBaseURL := false
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			if t.Name.Local == "BaseURL" {
+				inBaseURL = true
+			}
+			for i, attr := range t.Attr {
+				switch attr.Name.Local {
+				case "sourceURL", "media", "initialization", "href":
+					t.Attr[i].Value = secureAssetURL("/dash/videos", videoID, profile, attr.Value, expires, secret)
+				}
+			}
+			if err := encoder.EncodeToken(t); err != nil {
+				return "", err
+			}
+		case xml.EndElement:
+			if t.Name.Local == "BaseURL" {
+				inBaseURL = false
+			}
+			if err := encoder.EncodeToken(t); err != nil {
+				return "", err
+			}
+		case xml.CharData:
+			if inBaseURL {
+				t = xml.CharData([]byte(secureAssetURL("/dash/videos", videoID, profile, string(t), expires, secret)))
+			}
+			if err := encoder.EncodeToken(t); err != nil {
+				return "", err
+			}
+		default:
+			if err := encoder.EncodeToken(token); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	if err := encoder.Flush(); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+func secureAssetURL(routePrefix, videoID, profile, asset string, expires int64, secret string) string {
+	trimmed := strings.TrimSpace(asset)
+	if trimmed == "" ||
+		trimmed == "." ||
+		trimmed == "./" ||
+		strings.HasPrefix(trimmed, "http://") ||
+		strings.HasPrefix(trimmed, "https://") ||
+		strings.HasPrefix(trimmed, "data:") ||
+		strings.HasPrefix(trimmed, "/") {
+		return asset
+	}
+
+	trimmed = strings.TrimPrefix(trimmed, "./")
+	uri := fmt.Sprintf("%s/%s/%s/%s", routePrefix, videoID, profile, trimmed)
+	sig := computeSecureLinkMD5(expires, uri, secret)
+	return fmt.Sprintf("%s?expires=%d&md5=%s", uri, expires, sig)
 }
 
 // computeSecureLinkMD5 returns the base64url-encoded (no padding) MD5 hash
@@ -646,26 +788,57 @@ func (s *Server) downloadVideo(c *gin.Context) {
 	}
 }
 
-// getSegment streams a single .ts segment from MinIO.  nginx performs the
+// getHLSAsset streams a single HLS asset from storage. nginx performs the
 // secure_link verification before proxying requests to this handler.
-func (s *Server) getSegment(c *gin.Context) {
+func (s *Server) getHLSAsset(c *gin.Context) {
+	s.getStreamingAsset(c)
+}
+
+// getDASHAsset streams a single DASH asset from storage. nginx performs the
+// secure_link verification before proxying requests to this handler.
+func (s *Server) getDASHAsset(c *gin.Context) {
+	s.getStreamingAsset(c)
+}
+
+func (s *Server) getStreamingAsset(c *gin.Context) {
 	id := c.Param("id")
 	profile := c.Param("profile")
-	segment := c.Param("segment")
+	asset := strings.TrimPrefix(c.Param("asset"), "/")
+	if asset == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
+		return
+	}
 
-	objectName := fmt.Sprintf("videos/%s/%s/%s", id, profile, segment)
+	objectName := fmt.Sprintf("videos/%s/%s/%s", id, profile, asset)
 	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "segment not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
 		return
 	}
 	defer rc.Close()
 
-	c.Header("Content-Type", "video/mp2t")
+	c.Header("Content-Type", streamingContentType(asset))
 	c.Header("Content-Length", strconv.FormatInt(size, 10))
 	c.Status(http.StatusOK)
 	if _, err := io.Copy(c.Writer, rc); err != nil {
-		log.Printf("error streaming segment %s: %v", objectName, err)
+		log.Printf("error streaming asset %s: %v", objectName, err)
+	}
+}
+
+func streamingContentType(name string) string {
+	switch filepath.Ext(name) {
+	case ".m3u8":
+		return "application/vnd.apple.mpegurl"
+	case ".ts":
+		return "video/mp2t"
+	case ".mpd":
+		return "application/dash+xml"
+	case ".m4s":
+		return "video/iso.segment"
+	case ".mp4":
+		return "video/mp4"
+	default:
+		return "application/octet-stream"
 	}
 }
 

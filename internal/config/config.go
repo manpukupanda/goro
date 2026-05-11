@@ -78,13 +78,37 @@ type HLSConfig struct {
 	Profiles []HLSProfile `yaml:"profiles"`
 }
 
+type ProfileFormat string
+
+const (
+	ProfileFormatHLSTS    ProfileFormat = "hls_ts"
+	ProfileFormatHLSFMP4  ProfileFormat = "hls_fmp4"
+	ProfileFormatDASHFMP4 ProfileFormat = "dash_fmp4"
+)
+
 type HLSProfile struct {
-	Name           string `yaml:"name"`
-	Width          int    `yaml:"width"`
-	Height         int    `yaml:"height"`
-	VideoBitrate   string `yaml:"video_bitrate"`
-	AudioBitrate   string `yaml:"audio_bitrate"`
-	SegmentSeconds int    `yaml:"segment_seconds"`
+	Name           string        `yaml:"name"`
+	Format         ProfileFormat `yaml:"format"`
+	Width          int           `yaml:"width"`
+	Height         int           `yaml:"height"`
+	VideoBitrate   string        `yaml:"video_bitrate"`
+	AudioBitrate   string        `yaml:"audio_bitrate"`
+	SegmentSeconds int           `yaml:"segment_seconds"`
+}
+
+func (f ProfileFormat) IsHLS() bool {
+	return f == ProfileFormatHLSTS || f == ProfileFormatHLSFMP4
+}
+
+func (f ProfileFormat) IsDASH() bool {
+	return f == ProfileFormatDASHFMP4
+}
+
+func (p HLSProfile) EffectiveFormat() ProfileFormat {
+	if p.Format == "" {
+		return ProfileFormatHLSFMP4
+	}
+	return p.Format
 }
 
 func Load(path string) (*Config, error) {
@@ -141,8 +165,14 @@ func (c *Config) validateAndApplyDefaults() error {
 
 	for i := range c.HLS.Profiles {
 		p := &c.HLS.Profiles[i]
+		if p.Format == "" {
+			p.Format = ProfileFormatHLSFMP4
+		}
 		if p.Name == "" || p.Width <= 0 || p.Height <= 0 || p.VideoBitrate == "" || p.AudioBitrate == "" {
 			return fmt.Errorf("invalid hls profile at index %d", i)
+		}
+		if p.Format != ProfileFormatHLSTS && p.Format != ProfileFormatHLSFMP4 && p.Format != ProfileFormatDASHFMP4 {
+			return fmt.Errorf("invalid hls profile format %q at index %d", p.Format, i)
 		}
 		if p.SegmentSeconds <= 0 {
 			p.SegmentSeconds = 4
