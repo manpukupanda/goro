@@ -34,9 +34,14 @@
 
     const src = api.getStreamURL(video.public_id, profile.name, profile.format);
     if (profile.format === 'dash_fmp4') {
-      import('dashjs').then(({ default: dashjs }) => {
+      import('dashjs').then((module) => {
         if (!videoEl) return;
-        dash = dashjs.MediaPlayer().create();
+        const dashjs = module?.default?.MediaPlayer ? module.default : module;
+        const mediaPlayer = dashjs?.MediaPlayer;
+        if (!mediaPlayer) {
+          throw new Error('dash.js モジュールの読み込みに失敗しました');
+        }
+        dash = mediaPlayer().create();
         dash.extend('RequestModifier', () => ({
           modifyRequestURL(url) {
             return url;
@@ -49,7 +54,7 @@
             return xhr;
           },
         }), true);
-        dash.on(dashjs.MediaPlayer.events.ERROR, (evt) => {
+        dash.on(mediaPlayer.events.ERROR, (evt) => {
           error = `DASH エラー: ${evt?.error?.message ?? '再生に失敗しました'}`;
         });
         dash.initialize(videoEl, src, true);
