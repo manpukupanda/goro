@@ -28,7 +28,7 @@
 
     const profile = selectedProfileConfig(profileName);
     if (!profile) {
-      error = 'プロファイル設定が見つかりません';
+      error = 'Profile configuration not found';
       return;
     }
 
@@ -39,7 +39,7 @@
         const dashjs = module?.default?.MediaPlayer ? module.default : module;
         const mediaPlayer = dashjs?.MediaPlayer;
         if (!mediaPlayer) {
-          throw new Error('dash.js モジュールの読み込みに失敗しました');
+          throw new Error('Failed to load dash.js module');
         }
         dash = mediaPlayer().create();
         dash.extend('RequestModifier', () => ({
@@ -55,11 +55,11 @@
           },
         }), true);
         dash.on(mediaPlayer.events.ERROR, (evt) => {
-          error = `DASH エラー: ${evt?.error?.message ?? '再生に失敗しました'}`;
+          error = `DASH error: ${evt?.error?.message ?? 'Playback failed'}`;
         });
         dash.initialize(videoEl, src, true);
       }).catch((err) => {
-        error = `DASH プレイヤーの初期化に失敗しました: ${err.message}`;
+        error = `Failed to initialize DASH player: ${err.message}`;
       });
       return;
     }
@@ -75,13 +75,13 @@
       hls.attachMedia(videoEl);
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (data.fatal) {
-          error = `HLS エラー: ${data.type} / ${data.details}`;
+          error = `HLS error: ${data.type} / ${data.details}`;
         }
       });
     } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
       videoEl.src = src;
     } else {
-      error = 'このブラウザは HLS 再生に対応していません';
+      error = 'This browser does not support HLS playback';
     }
   }
 
@@ -107,7 +107,7 @@
       <p class="error">{error}</p>
     {/if}
     <div class="profile-select">
-      <label>プロファイル:
+      <label>Profile:
         <select bind:value={selectedProfile} onchange={() => loadVideo(selectedProfile)}>
           {#each profiles as p}
             <option value={p.name}>{p.name}</option>
