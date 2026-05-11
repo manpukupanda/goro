@@ -38,6 +38,9 @@ hls:
 	if got := cfg.HLS.Profiles[0].SegmentSeconds; got != 4 {
 		t.Fatalf("expected default segment_seconds 4, got %d", got)
 	}
+	if got := cfg.HLS.Profiles[0].Format; got != ProfileFormatHLSFMP4 {
+		t.Fatalf("expected default format %q, got %q", ProfileFormatHLSFMP4, got)
+	}
 	if cfg.Worker.Concurrency != 2 {
 		t.Fatalf("expected default worker concurrency 2, got %d", cfg.Worker.Concurrency)
 	}
@@ -117,7 +120,6 @@ hls:
 	}
 }
 
-
 func TestLoadDefault(t *testing.T) {
 	t.Setenv("GORO_API_KEY", "test-key")
 	t.Setenv("GORO_S3_ACCESS_KEY", "env-access")
@@ -143,7 +145,6 @@ func TestLoadDefault(t *testing.T) {
 	}
 }
 
-
 func TestLoadFailsWithoutAPIKey(t *testing.T) {
 	t.Setenv("GORO_API_KEY", "")
 	dir := t.TempDir()
@@ -168,5 +169,32 @@ hls:
 	_, err := Load(configPath)
 	if err == nil {
 		t.Fatal("expected Load to fail when GORO_API_KEY is not set")
+	}
+}
+
+func TestLoadRejectsInvalidProfileFormat(t *testing.T) {
+	t.Setenv("GORO_API_KEY", "test-key")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+s3:
+  endpoint: minio:9000
+  access_key: minio
+  secret_key: minio123
+  bucket: goro
+hls:
+  profiles:
+    - name: 720p
+      format: invalid
+      width: 1280
+      height: 720
+      video_bitrate: 2800k
+      audio_bitrate: 128k
+`), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	if _, err := Load(configPath); err == nil {
+		t.Fatal("expected invalid format to fail validation")
 	}
 }

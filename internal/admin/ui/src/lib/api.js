@@ -83,8 +83,9 @@ export const api = {
   setVisibility(id, visibility) {
     return request('PUT', `/videos/${id}/visibility`, { visibility });
   },
-  getPlaylistURL(id, profile) {
-    return `${BASE}/videos/${id}/playlist?profile=${encodeURIComponent(profile)}`;
+  getStreamURL(id, profile, format) {
+    const path = format === 'dash_fmp4' ? 'manifest' : 'playlist';
+    return `${BASE}/videos/${id}/${path}?profile=${encodeURIComponent(profile)}`;
   },
   async downloadVideo(id) {
     const headers = { ...authHeader() };

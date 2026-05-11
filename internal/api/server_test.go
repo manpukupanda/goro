@@ -178,6 +178,40 @@ func TestGetPlaylistRewritesSegmentURLs(t *testing.T) {
 	}
 }
 
+func TestGetPlaylistRewritesFMP4Assets(t *testing.T) {
+	const (
+		videoID = "abc123"
+		profile = "720p"
+		secret  = "testsecret"
+	)
+	m3u8 := "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:4.000000,\nsegment000.m4s\n#EXT-X-ENDLIST\n"
+
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.m3u8", videoID, profile): m3u8,
+		},
+	}
+	slCfg := config.SecureLinkConfig{Secret: secret, TTLSec: 3600}
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile, Format: config.ProfileFormatHLSFMP4}}}
+	srv := NewServer(nil, nil, store, slCfg, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile, nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, "/hls/videos/"+videoID+"/"+profile+"/init.mp4") {
+		t.Fatalf("expected rewritten init path in playlist, got:\n%s", body)
+	}
+	if !strings.Contains(body, "/hls/videos/"+videoID+"/"+profile+"/segment000.m4s") {
+		t.Fatalf("expected rewritten fMP4 segment path in playlist, got:\n%s", body)
+	}
+}
+
 func TestGetPlaylistUsesDefaultProfile(t *testing.T) {
 	const (
 		videoID = "abc123"
@@ -195,6 +229,52 @@ func TestGetPlaylistUsesDefaultProfile(t *testing.T) {
 
 	// No ?profile= query param — should fall back to hlsConfig.Profiles[0]
 	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist", nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", res.Code, res.Body.String())
+	}
+}
+
+func TestGetPlaylistUsesFirstHLSProfile(t *testing.T) {
+	const videoID = "abc123"
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.m3u8", videoID, "720p"): "#EXTM3U\n#EXT-X-ENDLIST\n",
+		},
+	}
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{
+		{Name: "dash", Format: config.ProfileFormatDASHFMP4},
+		{Name: "720p", Format: config.ProfileFormatHLSFMP4},
+	}}
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist", nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", res.Code, res.Body.String())
+	}
+}
+
+func TestGetManifestUsesFirstDASHProfile(t *testing.T) {
+	const videoID = "abc123"
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.mpd", videoID, "dash"): `<?xml version="1.0"?><MPD></MPD>`,
+		},
+	}
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{
+		{Name: "720p", Format: config.ProfileFormatHLSFMP4},
+		{Name: "dash", Format: config.ProfileFormatDASHFMP4},
+	}}
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/manifest", nil)
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
@@ -246,6 +326,66 @@ func TestRewritePlaylist(t *testing.T) {
 		if !strings.Contains(out, line) {
 			t.Fatalf("expected directive %q to remain unchanged in:\n%s", line, out)
 		}
+	}
+}
+
+func TestRewriteManifest(t *testing.T) {
+	const (
+		videoID = "vid1"
+		profile = "dash"
+		secret  = "s3cr3t"
+	)
+	expires := time.Now().Add(time.Hour).Unix()
+	mpd := `<?xml version="1.0"?>
+<MPD><Period><AdaptationSet><Representation><SegmentList><Initialization sourceURL="init-stream0.m4s"/><SegmentURL media="chunk-stream0-00001.m4s"/><SegmentURL media="chunk-stream0-00002.m4s"/></SegmentList></Representation></AdaptationSet></Period></MPD>`
+
+	out, err := rewriteManifest(strings.NewReader(mpd), videoID, profile, expires, secret)
+	if err != nil {
+		t.Fatalf("rewriteManifest error: %v", err)
+	}
+
+	for _, asset := range []string{"init-stream0.m4s", "chunk-stream0-00001.m4s", "chunk-stream0-00002.m4s"} {
+		uri := fmt.Sprintf("/dash/videos/%s/%s/%s", videoID, profile, asset)
+		sig := computeSecureLinkMD5(expires, uri, secret)
+		want := fmt.Sprintf("%s?expires=%d&amp;md5=%s", uri, expires, sig)
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in output, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestGetManifestRewritesSegmentURLs(t *testing.T) {
+	const (
+		videoID = "abc123"
+		profile = "dash"
+		secret  = "testsecret"
+	)
+	mpd := `<?xml version="1.0"?>
+<MPD><Period><AdaptationSet><Representation><SegmentList><Initialization sourceURL="init-stream0.m4s"/><SegmentURL media="chunk-stream0-00001.m4s"/></SegmentList></Representation></AdaptationSet></Period></MPD>`
+
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.mpd", videoID, profile): mpd,
+		},
+	}
+	slCfg := config.SecureLinkConfig{Secret: secret, TTLSec: 3600}
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile, Format: config.ProfileFormatDASHFMP4}}}
+	srv := NewServer(nil, nil, store, slCfg, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/manifest?profile="+profile, nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, "/dash/videos/"+videoID+"/"+profile+"/init-stream0.m4s") {
+		t.Fatalf("expected rewritten init path in manifest, got:\n%s", body)
+	}
+	if !strings.Contains(body, "/dash/videos/"+videoID+"/"+profile+"/chunk-stream0-00001.m4s") {
+		t.Fatalf("expected rewritten segment path in manifest, got:\n%s", body)
 	}
 }
 
@@ -562,6 +702,56 @@ func TestSegmentNoAuthRequired(t *testing.T) {
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected /hls/videos/:id/:profile/:segment to return 200 without auth, got %d", res.Code)
+	}
+}
+
+func TestManifestNoAuthRequired(t *testing.T) {
+	const (
+		videoID = "noauth3"
+		profile = "dash"
+	)
+	mpd := `<?xml version="1.0"?><MPD></MPD>`
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.mpd", videoID, profile): mpd,
+		},
+	}
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile, Format: config.ProfileFormatDASHFMP4}}}
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/manifest?profile="+profile, nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected /videos/:id/manifest to return 200 without auth, got %d", res.Code)
+	}
+}
+
+func TestDASHAssetNoAuthRequired(t *testing.T) {
+	const (
+		videoID = "noauth4"
+		profile = "dash"
+		asset   = "chunk-stream0-00001.m4s"
+	)
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/%s", videoID, profile, asset): "dash-data",
+		},
+	}
+	srv := NewServer(nil, nil, store, config.SecureLinkConfig{}, config.HLSConfig{}, config.PlaylistTokenConfig{}, testAPIKey)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/dash/videos/"+videoID+"/"+profile+"/"+asset, nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected /dash/videos/:id/:profile/:asset to return 200 without auth, got %d", res.Code)
+	}
+	if got := res.Header().Get("Content-Type"); got != "video/iso.segment" {
+		t.Fatalf("expected video/iso.segment content type, got %q", got)
 	}
 }
 

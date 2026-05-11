@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onDestroy } from 'svelte';
   import Hls from 'hls.js';
   import { api } from '../lib/api.js';
   import { authHeader } from '../lib/auth.js';
@@ -9,21 +9,56 @@
   let selectedProfile = $state(profiles[0]?.name ?? '');
   let videoEl = $state(null);
   let hls = null;
+  let dash = null;
   let error = $state('');
 
-  function buildPlaylistURL(profile) {
-    const base = api.getPlaylistURL(video.public_id, profile);
-    // No query-param token needed — the HLS XHR loader injects the
-    // Authorization header directly (see xhrSetup below).
-    return base;
+  function selectedProfileConfig(profileName) {
+    return profiles.find((profile) => profile.name === profileName);
   }
 
-  function loadVideo(profile) {
+  function destroyPlayers() {
+    if (hls) { hls.destroy(); hls = null; }
+    if (dash) { dash.reset(); dash = null; }
+  }
+
+  async function loadVideo(profileName) {
     if (!videoEl) return;
     error = '';
-    if (hls) { hls.destroy(); hls = null; }
+    destroyPlayers();
 
-    const src = buildPlaylistURL(profile);
+    const profile = selectedProfileConfig(profileName);
+    if (!profile) {
+      error = 'プロファイル設定が見つかりません';
+      return;
+    }
+
+    const src = api.getStreamURL(video.public_id, profile.name, profile.format);
+    if (profile.format === 'dash_fmp4') {
+      import('dashjs').then(({ default: dashjs }) => {
+        if (!videoEl) return;
+        dash = dashjs.MediaPlayer().create();
+        dash.extend('RequestModifier', () => ({
+          modifyRequestURL(url) {
+            return url;
+          },
+          modifyRequestHeader(xhr) {
+            const headers = authHeader();
+            for (const [key, value] of Object.entries(headers)) {
+              xhr.setRequestHeader(key, value);
+            }
+            return xhr;
+          },
+        }), true);
+        dash.on(dashjs.MediaPlayer.events.ERROR, (evt) => {
+          error = `DASH エラー: ${evt?.error?.message ?? '再生に失敗しました'}`;
+        });
+        dash.initialize(videoEl, src, true);
+      }).catch((err) => {
+        error = `DASH プレイヤーの初期化に失敗しました: ${err.message}`;
+      });
+      return;
+    }
+
     if (Hls.isSupported()) {
       hls = new Hls({
         xhrSetup(xhr) {
@@ -52,7 +87,7 @@
   });
 
   onDestroy(() => {
-    if (hls) hls.destroy();
+    destroyPlayers();
   });
 </script>
 
