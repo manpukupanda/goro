@@ -102,7 +102,7 @@ export const api = {
     let filename = `video-${id}.mp4`;
     const cd = res.headers.get('content-disposition');
     if (cd) {
-      const mStar = cd.match(/filename\*=UTF-8''([^;]+)/i);
+      const mStar = cd.match(/filename\*=UTF-8''([^;\s]+)/i);
       if (mStar) {
         filename = decodeURIComponent(mStar[1]);
       } else {
