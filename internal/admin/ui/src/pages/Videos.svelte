@@ -418,7 +418,7 @@
   .badge-failed { background: #fee2e2; color: #991b1b; }
   .badge-public { background: #d1fae5; color: #065f46; }
   .badge-private { background: #f3f4f6; color: #6b7280; }
-  .actions-cell { white-space: nowrap; display: flex; gap: .4rem; }
+  .actions-cell { white-space: nowrap; gap: .4rem; }
   .btn-small { padding: .25rem .6rem; font-size: .75rem; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; background: white; }
   .btn-small:hover:not(:disabled) { background: #f3f4f6; }
   .btn-small:disabled { opacity: .4; cursor: not-allowed; }
@@ -435,4 +435,3 @@
   .error { color: #dc2626; font-size: .875rem; }
   .muted { color: #9ca3af; }
 </style>
-
