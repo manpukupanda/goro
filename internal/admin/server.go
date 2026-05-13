@@ -210,29 +210,29 @@ func (s *Server) resolveProfile(requested string, allow func(config.ProfileForma
 //   - height_max   – height <= value (pixels)
 func (s *Server) listVideos(c *gin.Context) {
 	type videoRow struct {
-		PublicID        string   `json:"public_id"`
-		OriginalName    string   `json:"original_name"`
-		Status          string   `json:"status"`
-		Visibility      string   `json:"visibility"`
+		PublicID          string   `json:"public_id"`
+		OriginalName      string   `json:"original_name"`
+		Status            string   `json:"status"`
+		Visibility        string   `json:"visibility"`
 		ReferrerWhitelist []string `json:"referrer_whitelist"`
-		CreatedAt       string   `json:"created_at"`
-		DurationSec     *float64 `json:"duration_sec,omitempty"`
-		Width           *int     `json:"width,omitempty"`
-		Height          *int     `json:"height,omitempty"`
-		VideoCodec      *string  `json:"video_codec,omitempty"`
-		Bitrate         *int64   `json:"bitrate,omitempty"`
-		Framerate       *string  `json:"framerate,omitempty"`
-		FramerateFloat  *float64 `json:"framerate_float,omitempty"`
-		ContainerFormat *string  `json:"container_format,omitempty"`
-		AudioCodec      *string  `json:"audio_codec,omitempty"`
-		AudioBitrate    *int64   `json:"audio_bitrate,omitempty"`
-		SampleRate      *int     `json:"sample_rate,omitempty"`
-		Channels        *int     `json:"channels,omitempty"`
-		FileSize        *int64   `json:"file_size,omitempty"`
-		AspectRatio     *string  `json:"aspect_ratio,omitempty"`
-		Rotation        *int     `json:"rotation,omitempty"`
-		HasAudio        *bool    `json:"has_audio,omitempty"`
-		HasVideo        *bool    `json:"has_video,omitempty"`
+		CreatedAt         string   `json:"created_at"`
+		DurationSec       *float64 `json:"duration_sec,omitempty"`
+		Width             *int     `json:"width,omitempty"`
+		Height            *int     `json:"height,omitempty"`
+		VideoCodec        *string  `json:"video_codec,omitempty"`
+		Bitrate           *int64   `json:"bitrate,omitempty"`
+		Framerate         *string  `json:"framerate,omitempty"`
+		FramerateFloat    *float64 `json:"framerate_float,omitempty"`
+		ContainerFormat   *string  `json:"container_format,omitempty"`
+		AudioCodec        *string  `json:"audio_codec,omitempty"`
+		AudioBitrate      *int64   `json:"audio_bitrate,omitempty"`
+		SampleRate        *int     `json:"sample_rate,omitempty"`
+		Channels          *int     `json:"channels,omitempty"`
+		FileSize          *int64   `json:"file_size,omitempty"`
+		AspectRatio       *string  `json:"aspect_ratio,omitempty"`
+		Rotation          *int     `json:"rotation,omitempty"`
+		HasAudio          *bool    `json:"has_audio,omitempty"`
+		HasVideo          *bool    `json:"has_video,omitempty"`
 	}
 
 	base := `SELECT public_id, original_name, status, visibility, referrer_whitelist, created_at,
@@ -314,22 +314,22 @@ func (s *Server) listVideos(c *gin.Context) {
 	for rows.Next() {
 		var v videoRow
 		var (
-			durationSec     sql.NullFloat64
-			width           sql.NullInt64
-			height          sql.NullInt64
-			videoCodec      sql.NullString
-			bitrate         sql.NullInt64
-			framerate       sql.NullString
-			containerFormat sql.NullString
-			audioCodec      sql.NullString
-			audioBitrate    sql.NullInt64
-			sampleRate      sql.NullInt64
-			channels        sql.NullInt64
-			fileSize        sql.NullInt64
-			aspectRatio     sql.NullString
-			rotation        sql.NullInt64
-			hasAudio        sql.NullInt64
-			hasVideo        sql.NullInt64
+			durationSec       sql.NullFloat64
+			width             sql.NullInt64
+			height            sql.NullInt64
+			videoCodec        sql.NullString
+			bitrate           sql.NullInt64
+			framerate         sql.NullString
+			containerFormat   sql.NullString
+			audioCodec        sql.NullString
+			audioBitrate      sql.NullInt64
+			sampleRate        sql.NullInt64
+			channels          sql.NullInt64
+			fileSize          sql.NullInt64
+			aspectRatio       sql.NullString
+			rotation          sql.NullInt64
+			hasAudio          sql.NullInt64
+			hasVideo          sql.NullInt64
 			referrerWhitelist sql.NullString
 		)
 		if err := rows.Scan(
