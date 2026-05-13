@@ -14,6 +14,7 @@
   let playingVideo = $state(null);
   let thumbnailVideo = $state(null);
   let togglingId = $state(null);
+  let updatingReferrerId = $state(null);
   let deletingId = $state(null);
   let downloadingId = $state(null);
 
@@ -100,6 +101,30 @@
       error = err.message;
     } finally {
       deletingId = null;
+    }
+  }
+
+  async function editReferrerWhitelist(video) {
+    const current = (video.referrer_whitelist ?? []).join('\n');
+    const input = window.prompt(
+      'Allowed referer domains (one per line)\nExamples: example.com, *.example.com, example.com:8443',
+      current,
+    );
+    if (input === null) return;
+
+    const list = input
+      .split(/\r?\n/)
+      .map(v => v.trim())
+      .filter(Boolean);
+
+    updatingReferrerId = video.public_id;
+    try {
+      const res = await api.setReferrerWhitelist(video.public_id, list);
+      video.referrer_whitelist = res.referrer_whitelist ?? [];
+    } catch (err) {
+      error = err.message;
+    } finally {
+      updatingReferrerId = null;
     }
   }
 
@@ -275,6 +300,7 @@
             <th>File Name</th>
             <th>Status</th>
             <th>Visibility</th>
+            <th>Referer Whitelist</th>
             <th>Thumbnail</th>
             <th>Duration</th>
             <th>Resolution</th>
@@ -306,6 +332,7 @@
                   {v.visibility === 'public' ? 'Public' : 'Private'}
                 </span>
               </td>
+              <td class="mono">{(v.referrer_whitelist ?? []).join(', ') || '—'}</td>
               <td class="thumb-cell">
                 {#if v.status === 'ready' && thumbnailSpecs.length > 0}
                   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -348,6 +375,11 @@
                   disabled={togglingId === v.public_id}
                   onclick={() => toggleVisibility(v)}
                 >{v.visibility === 'public' ? 'Make Private' : 'Make Public'}</button>
+                <button
+                  class="btn-small"
+                  disabled={updatingReferrerId === v.public_id}
+                  onclick={() => editReferrerWhitelist(v)}
+                >{updatingReferrerId === v.public_id ? 'Saving…' : 'Referer Rules'}</button>
                 <button
                   class="btn-small btn-delete"
                   disabled={deletingId === v.public_id}

@@ -518,6 +518,49 @@ func TestSetVisibilityNotFound(t *testing.T) {
 	}
 }
 
+func TestSetReferrerWhitelist(t *testing.T) {
+	database := openTestDB(t)
+	srv := newTestServer(t, database)
+	router := srv.Router()
+	videoID := uploadTestVideo(t, router)
+
+	body := strings.NewReader(`{"referrer_whitelist":["example.com","*.example.com","example.com"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/videos/"+videoID+"/referrer-whitelist", body)
+	req.Header.Set("Content-Type", "application/json")
+	authRequest(req)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var stored string
+	if err := database.QueryRow(`SELECT referrer_whitelist FROM videos WHERE public_id = ?`, videoID).Scan(&stored); err != nil {
+		t.Fatalf("failed to read stored whitelist: %v", err)
+	}
+	if stored != "example.com\n*.example.com" {
+		t.Fatalf("unexpected stored whitelist: %q", stored)
+	}
+}
+
+func TestSetReferrerWhitelistInvalid(t *testing.T) {
+	database := openTestDB(t)
+	srv := newTestServer(t, database)
+	router := srv.Router()
+	videoID := uploadTestVideo(t, router)
+
+	body := strings.NewReader(`{"referrer_whitelist":["https://example.com"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/videos/"+videoID+"/referrer-whitelist", body)
+	req.Header.Set("Content-Type", "application/json")
+	authRequest(req)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", res.Code)
+	}
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeVideoReferrerWhitelistInvalid, "referrer whitelist must contain domains only")
+}
+
 func TestIssueToken(t *testing.T) {
 	database := openTestDB(t)
 	srv := newTestServer(t, database)
@@ -638,6 +681,144 @@ func TestGetPlaylistPrivateWithExpiredToken(t *testing.T) {
 		t.Fatalf("expected 403 with expired token, got %d", res.Code)
 	}
 	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeTokenInvalidOrExpired, "invalid or expired token")
+}
+
+func TestGetPlaylistReferrerWhitelist(t *testing.T) {
+	const (
+		videoID = "refwl1"
+		profile = "720p"
+	)
+	m3u8 := "#EXTM3U\n#EXT-X-ENDLIST\n"
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.m3u8", videoID, profile): m3u8,
+		},
+	}
+	database := openTestDB(t)
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile}}}
+	srv := NewServer(database, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{TTLSec: 900}, testAPIKey)
+	router := srv.Router()
+
+	_, err := database.Exec(
+		`INSERT INTO videos (public_id, original_name, temp_path, status, visibility, referrer_whitelist) VALUES (?, 'v', 'p', 'ready', 'public', ?)`,
+		videoID, "example.com\n*.example.org\nexample.com:8443")
+	if err != nil {
+		t.Fatalf("insert video: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		referer string
+		want    int
+	}{
+		{name: "exact domain", referer: "https://example.com/page", want: http.StatusOK},
+		{name: "wildcard domain", referer: "https://sub.example.org/path", want: http.StatusOK},
+		{name: "exact host and port", referer: "https://example.com:8443/path", want: http.StatusOK},
+		{name: "missing referer", referer: "", want: http.StatusForbidden},
+		{name: "port mismatch denied", referer: "https://example.org:8443/path", want: http.StatusForbidden},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile, nil)
+			if tc.referer != "" {
+				req.Header.Set("Referer", tc.referer)
+			}
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			if res.Code != tc.want {
+				t.Fatalf("expected %d, got %d: %s", tc.want, res.Code, res.Body.String())
+			}
+			if tc.want == http.StatusForbidden {
+				assertErrorResponse(t, res.Body.Bytes(), errcode.CodeRefererNotAllowed, "referer is not allowed")
+			}
+		})
+	}
+}
+
+func TestGetPlaylistPrivateRequiresRefererWhenWhitelistConfigured(t *testing.T) {
+	const (
+		videoID = "pvt-ref"
+		profile = "720p"
+	)
+	m3u8 := "#EXTM3U\n#EXT-X-ENDLIST\n"
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.m3u8", videoID, profile): m3u8,
+		},
+	}
+	database := openTestDB(t)
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile}}}
+	srv := NewServer(database, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{TTLSec: 900}, testAPIKey)
+	router := srv.Router()
+
+	_, err := database.Exec(
+		`INSERT INTO videos (public_id, original_name, temp_path, status, visibility, referrer_whitelist) VALUES (?, 'v', 'p', 'ready', 'private', ?)`,
+		videoID, "example.com")
+	if err != nil {
+		t.Fatalf("insert video: %v", err)
+	}
+	var internalID int64
+	_ = database.QueryRow(`SELECT id FROM videos WHERE public_id = ?`, videoID).Scan(&internalID)
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	_, _ = database.Exec(`INSERT INTO playlist_tokens (token, video_id, expires_at) VALUES ('validtoken456', ?, ?)`, internalID, expiresAt)
+
+	req := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/playlist?profile="+profile+"&token=validtoken456", nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without referer, got %d", res.Code)
+	}
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeRefererNotAllowed, "referer is not allowed")
+}
+
+func TestManifestAndDashAssetApplyReferrerWhitelist(t *testing.T) {
+	const (
+		videoID = "dash-ref"
+		profile = "720p"
+		asset   = "chunk.m4s"
+	)
+	mpd := "<?xml version=\"1.0\"?><MPD><Period><BaseURL>segment.m4s</BaseURL></Period></MPD>"
+	store := &stubStorage{
+		objects: map[string]string{
+			fmt.Sprintf("videos/%s/%s/index.mpd", videoID, profile): mpd,
+			fmt.Sprintf("videos/%s/%s/%s", videoID, profile, asset): "dash-data",
+		},
+	}
+	database := openTestDB(t)
+	hlsCfg := config.HLSConfig{Profiles: []config.HLSProfile{{Name: profile, Format: config.ProfileFormatDASHFMP4}}}
+	srv := NewServer(database, nil, store, config.SecureLinkConfig{TTLSec: 3600}, hlsCfg, config.PlaylistTokenConfig{TTLSec: 900}, testAPIKey)
+	router := srv.Router()
+
+	_, err := database.Exec(
+		`INSERT INTO videos (public_id, original_name, temp_path, status, visibility, referrer_whitelist) VALUES (?, 'v', 'p', 'ready', 'public', ?)`,
+		videoID, "example.com")
+	if err != nil {
+		t.Fatalf("insert video: %v", err)
+	}
+
+	reqManifest := httptest.NewRequest(http.MethodGet, "/videos/"+videoID+"/manifest?profile="+profile, nil)
+	reqManifest.Header.Set("Referer", "https://example.com/watch")
+	resManifest := httptest.NewRecorder()
+	router.ServeHTTP(resManifest, reqManifest)
+	if resManifest.Code != http.StatusOK {
+		t.Fatalf("expected 200 for manifest with allowed referer, got %d: %s", resManifest.Code, resManifest.Body.String())
+	}
+
+	reqAssetDenied := httptest.NewRequest(http.MethodGet, "/dash/videos/"+videoID+"/"+profile+"/"+asset, nil)
+	resAssetDenied := httptest.NewRecorder()
+	router.ServeHTTP(resAssetDenied, reqAssetDenied)
+	if resAssetDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for dash asset without referer, got %d", resAssetDenied.Code)
+	}
+	assertErrorResponse(t, resAssetDenied.Body.Bytes(), errcode.CodeRefererNotAllowed, "referer is not allowed")
+
+	reqAssetAllowed := httptest.NewRequest(http.MethodGet, "/dash/videos/"+videoID+"/"+profile+"/"+asset, nil)
+	reqAssetAllowed.Header.Set("Referer", "https://example.com/watch")
+	resAssetAllowed := httptest.NewRecorder()
+	router.ServeHTTP(resAssetAllowed, reqAssetAllowed)
+	if resAssetAllowed.Code != http.StatusOK {
+		t.Fatalf("expected 200 for dash asset with allowed referer, got %d: %s", resAssetAllowed.Code, resAssetAllowed.Body.String())
+	}
 }
 
 func TestNewToken(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"goro/internal/config"
 	"goro/internal/errcode"
 	"goro/internal/queue"
+	"goro/internal/referrer"
 
 	"github.com/gin-gonic/gin"
 )
@@ -71,6 +72,7 @@ func (s *Server) Router() *gin.Engine {
 	// Management endpoints
 	auth.GET("/videos", s.listVideos)
 	auth.PUT("/videos/:id/visibility", s.setVisibility)
+	auth.PUT("/videos/:id/referrer-whitelist", s.setReferrerWhitelist)
 	auth.POST("/videos/:id/tokens", s.issueToken)
 	auth.DELETE("/videos/:id", s.deleteVideo)
 	auth.GET("/videos/:id/download", s.downloadVideo)
@@ -116,6 +118,7 @@ func (s *Server) listVideos(c *gin.Context) {
 		OriginalName    string   `json:"original_name"`
 		Status          string   `json:"status"`
 		Visibility      string   `json:"visibility"`
+		ReferrerWhitelist []string `json:"referrer_whitelist"`
 		CreatedAt       string   `json:"created_at"`
 		DurationSec     *float64 `json:"duration_sec,omitempty"`
 		Width           *int     `json:"width,omitempty"`
@@ -136,7 +139,7 @@ func (s *Server) listVideos(c *gin.Context) {
 		HasVideo        *bool    `json:"has_video,omitempty"`
 	}
 
-	base := `SELECT public_id, original_name, status, visibility, created_at,
+	base := `SELECT public_id, original_name, status, visibility, referrer_whitelist, created_at,
 		duration_sec, width, height, video_codec, bitrate, framerate,
 		container_format, audio_codec, audio_bitrate, sample_rate, channels,
 		file_size, aspect_ratio, rotation, has_audio, has_video
@@ -231,9 +234,10 @@ func (s *Server) listVideos(c *gin.Context) {
 			rotation        sql.NullInt64
 			hasAudio        sql.NullInt64
 			hasVideo        sql.NullInt64
+			referrerWhitelist sql.NullString
 		)
 		if err := rows.Scan(
-			&v.PublicID, &v.OriginalName, &v.Status, &v.Visibility, &v.CreatedAt,
+			&v.PublicID, &v.OriginalName, &v.Status, &v.Visibility, &referrerWhitelist, &v.CreatedAt,
 			&durationSec, &width, &height, &videoCodec, &bitrate, &framerate,
 			&containerFormat, &audioCodec, &audioBitrate, &sampleRate, &channels,
 			&fileSize, &aspectRatio, &rotation, &hasAudio, &hasVideo,
@@ -297,6 +301,11 @@ func (s *Server) listVideos(c *gin.Context) {
 		if hasVideo.Valid {
 			hv := hasVideo.Int64 != 0
 			v.HasVideo = &hv
+		}
+		if referrerWhitelist.Valid {
+			v.ReferrerWhitelist = referrer.DecodeWhitelist(referrerWhitelist.String)
+		} else {
+			v.ReferrerWhitelist = []string{}
 		}
 		videos = append(videos, v)
 	}
@@ -382,9 +391,9 @@ func (s *Server) uploadVideo(c *gin.Context) {
 func (s *Server) getPlaylist(c *gin.Context) {
 	id := c.Param("id")
 
-	// Check visibility when a DB is configured.
+	// Check visibility/referer when a DB is configured.
 	if s.db != nil {
-		if err := s.authorizePlaylist(c, id); err != nil {
+		if err := s.authorizePlayback(c, id); err != nil {
 			return
 		}
 	}
@@ -422,7 +431,7 @@ func (s *Server) getManifest(c *gin.Context) {
 	id := c.Param("id")
 
 	if s.db != nil {
-		if err := s.authorizePlaylist(c, id); err != nil {
+		if err := s.authorizePlayback(c, id); err != nil {
 			return
 		}
 	}
@@ -454,13 +463,14 @@ func (s *Server) getManifest(c *gin.Context) {
 	c.String(http.StatusOK, out)
 }
 
-// authorizePlaylist checks whether the request is authorized to access the playlist.
-// Returns nil if authorized (or video is public), non-nil and writes a response if not.
-func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
+// authorizePlayback checks whether the request is authorized to access the playlist/manifest.
+// Returns nil if authorized, non-nil and writes a response if not.
+func (s *Server) authorizePlayback(c *gin.Context, publicID string) error {
 	var videoID int64
 	var visibility string
+	var rawWhitelist string
 	err := s.db.QueryRowContext(c.Request.Context(),
-		`SELECT id, visibility FROM videos WHERE public_id = ?`, publicID).Scan(&videoID, &visibility)
+		`SELECT id, visibility, referrer_whitelist FROM videos WHERE public_id = ?`, publicID).Scan(&videoID, &visibility, &rawWhitelist)
 	if err == sql.ErrNoRows {
 		writeError(c, http.StatusNotFound, "video not found")
 		return err
@@ -468,6 +478,12 @@ func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "failed to look up video")
 		return err
+	}
+
+	whitelist := referrer.DecodeWhitelist(rawWhitelist)
+	if !referrer.IsAllowed(c.GetHeader("Referer"), whitelist) {
+		writeError(c, http.StatusForbidden, "referer is not allowed")
+		return fmt.Errorf("referer is not allowed")
 	}
 
 	if visibility == "public" {
@@ -504,6 +520,27 @@ func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
 		return fmt.Errorf("token expired")
 	}
 
+	return nil
+}
+
+func (s *Server) authorizeStreamingAssetReferer(c *gin.Context, publicID string) error {
+	var rawWhitelist string
+	err := s.db.QueryRowContext(c.Request.Context(),
+		`SELECT referrer_whitelist FROM videos WHERE public_id = ?`, publicID).Scan(&rawWhitelist)
+	if err == sql.ErrNoRows {
+		writeError(c, http.StatusNotFound, "video not found")
+		return err
+	}
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "failed to look up video")
+		return err
+	}
+
+	whitelist := referrer.DecodeWhitelist(rawWhitelist)
+	if !referrer.IsAllowed(c.GetHeader("Referer"), whitelist) {
+		writeError(c, http.StatusForbidden, "referer is not allowed")
+		return fmt.Errorf("referer is not allowed")
+	}
 	return nil
 }
 
@@ -590,6 +627,36 @@ func (s *Server) setVisibility(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"visibility": body.Visibility})
+}
+
+func (s *Server) setReferrerWhitelist(c *gin.Context) {
+	publicID := c.Param("id")
+	var body struct {
+		ReferrerWhitelist []string `json:"referrer_whitelist"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeError(c, http.StatusBadRequest, "referrer whitelist must contain domains only")
+		return
+	}
+
+	normalized, err := referrer.NormalizeWhitelist(body.ReferrerWhitelist)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "referrer whitelist must contain domains only")
+		return
+	}
+
+	res, err := s.db.ExecContext(c.Request.Context(),
+		`UPDATE videos SET referrer_whitelist = ? WHERE public_id = ?`, referrer.EncodeWhitelist(normalized), publicID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "failed to update referrer whitelist")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		writeError(c, http.StatusNotFound, "video not found")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"referrer_whitelist": normalized})
 }
 
 // issueToken issues a short-lived opaque token for accessing a private video's playlist.
@@ -812,6 +879,11 @@ func (s *Server) getStreamingAsset(c *gin.Context) {
 	if asset == "" {
 		writeError(c, http.StatusNotFound, "asset not found")
 		return
+	}
+	if s.db != nil {
+		if err := s.authorizeStreamingAssetReferer(c, id); err != nil {
+			return
+		}
 	}
 
 	objectName := fmt.Sprintf("videos/%s/%s/%s", id, profile, asset)

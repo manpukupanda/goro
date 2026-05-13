@@ -36,6 +36,9 @@ const (
 	CodeVideoVisibilityUpdateFailed = "VIDEO_VISIBILITY_UPDATE_FAILED"
 	CodeTokenGenerateFailed         = "TOKEN_GENERATE_FAILED"
 	CodeTokenStoreFailed            = "TOKEN_STORE_FAILED"
+	CodeRefererNotAllowed           = "REFERER_NOT_ALLOWED"
+	CodeVideoReferrerWhitelistInvalid = "VIDEO_REFERRER_WHITELIST_INVALID"
+	CodeVideoReferrerWhitelistUpdateFailed = "VIDEO_REFERRER_WHITELIST_UPDATE_FAILED"
 	CodeVideoNotReady               = "VIDEO_NOT_READY"
 	CodeVideoOriginalNotFound       = "VIDEO_ORIGINAL_NOT_FOUND"
 	CodeStreamAssetNotFound         = "STREAM_ASSET_NOT_FOUND"
@@ -79,6 +82,9 @@ var (
 	ErrVideoVisibilityUpdateFailed = Error{Code: CodeVideoVisibilityUpdateFailed, Message: "failed to update visibility"}
 	ErrTokenGenerateFailed         = Error{Code: CodeTokenGenerateFailed, Message: "failed to generate token"}
 	ErrTokenStoreFailed            = Error{Code: CodeTokenStoreFailed, Message: "failed to store token"}
+	ErrRefererNotAllowed           = Error{Code: CodeRefererNotAllowed, Message: "referer is not allowed"}
+	ErrVideoReferrerWhitelistInvalid = Error{Code: CodeVideoReferrerWhitelistInvalid, Message: "referrer whitelist must contain domains only"}
+	ErrVideoReferrerWhitelistUpdateFailed = Error{Code: CodeVideoReferrerWhitelistUpdateFailed, Message: "failed to update referrer whitelist"}
 	ErrVideoNotReady               = Error{Code: CodeVideoNotReady, Message: "video not found or not ready"}
 	ErrVideoOriginalNotFound       = Error{Code: CodeVideoOriginalNotFound, Message: "original file not found"}
 	ErrStreamAssetNotFound         = Error{Code: CodeStreamAssetNotFound, Message: "asset not found"}
@@ -122,6 +128,9 @@ var catalog = []Error{
 	ErrVideoVisibilityUpdateFailed,
 	ErrTokenGenerateFailed,
 	ErrTokenStoreFailed,
+	ErrRefererNotAllowed,
+	ErrVideoReferrerWhitelistInvalid,
+	ErrVideoReferrerWhitelistUpdateFailed,
 	ErrVideoNotReady,
 	ErrVideoOriginalNotFound,
 	ErrStreamAssetNotFound,
