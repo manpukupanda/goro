@@ -4,6 +4,7 @@
   import VideoPlayer from '../components/VideoPlayer.svelte';
   import ThumbnailImage from '../components/ThumbnailImage.svelte';
   import ThumbnailModal from '../components/ThumbnailModal.svelte';
+  import ReferrerWhitelistModal from '../components/ReferrerWhitelistModal.svelte';
 
   let videos = $state([]);
   let profiles = $state([]);
@@ -13,8 +14,8 @@
   let showUpload = $state(false);
   let playingVideo = $state(null);
   let thumbnailVideo = $state(null);
+  let referrerWhitelistVideo = $state(null);
   let togglingId = $state(null);
-  let updatingReferrerId = $state(null);
   let deletingId = $state(null);
   let downloadingId = $state(null);
 
@@ -104,28 +105,8 @@
     }
   }
 
-  async function editReferrerWhitelist(video) {
-    const current = (video.referrer_whitelist ?? []).join('\n');
-    const input = window.prompt(
-      'Allowed referer domains (one per line)\nExamples: example.com, *.example.com, example.com:8443',
-      current,
-    );
-    if (input === null) return;
-
-    const list = input
-      .split(/\r?\n/)
-      .map(v => v.trim())
-      .filter(Boolean);
-
-    updatingReferrerId = video.public_id;
-    try {
-      const res = await api.setReferrerWhitelist(video.public_id, list);
-      video.referrer_whitelist = res.referrer_whitelist ?? [];
-    } catch (err) {
-      error = err.message;
-    } finally {
-      updatingReferrerId = null;
-    }
+  function editReferrerWhitelist(video) {
+    referrerWhitelistVideo = video;
   }
 
   async function downloadVideo(video) {
@@ -300,7 +281,7 @@
             <th>File Name</th>
             <th>Status</th>
             <th>Visibility</th>
-            <th>Referer Whitelist</th>
+            <th>Referrer Whitelist</th>
             <th>Thumbnail</th>
             <th>Duration</th>
             <th>Resolution</th>
@@ -377,9 +358,9 @@
                 >{v.visibility === 'public' ? 'Make Private' : 'Make Public'}</button>
                 <button
                   class="btn-small"
-                  disabled={updatingReferrerId === v.public_id}
+                  title="Edit referrer whitelist for {v.original_name}"
                   onclick={() => editReferrerWhitelist(v)}
-                >{updatingReferrerId === v.public_id ? 'Saving…' : 'Referer Rules'}</button>
+                >Referrer Rules</button>
                 <button
                   class="btn-small btn-delete"
                   disabled={deletingId === v.public_id}
@@ -409,6 +390,14 @@
 
 {#if thumbnailVideo}
   <ThumbnailModal video={thumbnailVideo} {thumbnailSpecs} onClose={() => { thumbnailVideo = null; }} />
+{/if}
+
+{#if referrerWhitelistVideo}
+  <ReferrerWhitelistModal
+    video={referrerWhitelistVideo}
+    onClose={() => { referrerWhitelistVideo = null; }}
+    onSaved={(list) => { referrerWhitelistVideo.referrer_whitelist = list; }}
+  />
 {/if}
 
 <style>
