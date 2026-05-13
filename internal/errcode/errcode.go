@@ -11,6 +11,7 @@ const (
 	CodeInternalError                      = "COMMON_INTERNAL_ERROR"
 	CodeAuthUnauthorized                   = "AUTH_UNAUTHORIZED"
 	CodeVideoFileRequired                  = "VIDEO_FILE_REQUIRED"
+	CodeRequestBodyInvalid                 = "REQUEST_BODY_INVALID"
 	CodeVideoUnsupportedFormat             = "VIDEO_UNSUPPORTED_FORMAT"
 	CodeVideoUploadDirPrepareFailed        = "VIDEO_UPLOAD_DIR_PREPARE_FAILED"
 	CodeVideoUploadSaveFailed              = "VIDEO_UPLOAD_SAVE_FAILED"
@@ -57,6 +58,7 @@ var (
 
 	ErrAuthUnauthorized                   = Error{Code: CodeAuthUnauthorized, Message: "unauthorized"}
 	ErrVideoFileRequired                  = Error{Code: CodeVideoFileRequired, Message: "file is required"}
+	ErrRequestBodyInvalid                 = Error{Code: CodeRequestBodyInvalid, Message: "invalid request body"}
 	ErrVideoUnsupportedFormat             = Error{Code: CodeVideoUnsupportedFormat, Message: "only .mp4 is supported"}
 	ErrVideoUploadDirPrepareFailed        = Error{Code: CodeVideoUploadDirPrepareFailed, Message: "failed to prepare upload directory"}
 	ErrVideoUploadSaveFailed              = Error{Code: CodeVideoUploadSaveFailed, Message: "failed to save uploaded file"}
@@ -103,6 +105,7 @@ var catalog = []Error{
 	ErrInternalError,
 	ErrAuthUnauthorized,
 	ErrVideoFileRequired,
+	ErrRequestBodyInvalid,
 	ErrVideoUnsupportedFormat,
 	ErrVideoUploadDirPrepareFailed,
 	ErrVideoUploadSaveFailed,

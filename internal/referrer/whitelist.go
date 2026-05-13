@@ -63,6 +63,7 @@ func IsAllowed(refererHeader string, whitelist []string) bool {
 	host := strings.ToLower(parsed.Host)
 	for _, rule := range whitelist {
 		if strings.HasPrefix(rule, "*.") {
+			// Wildcard rules match subdomains only.
 			suffix := rule[2:]
 			if host != suffix && strings.HasSuffix(host, "."+suffix) {
 				return true

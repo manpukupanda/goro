@@ -635,7 +635,7 @@ func (s *Server) setReferrerWhitelist(c *gin.Context) {
 		ReferrerWhitelist []string `json:"referrer_whitelist"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		writeError(c, http.StatusBadRequest, "referrer whitelist must contain domains only")
+		writeError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
