@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"goro/internal/config"
+	"goro/internal/errcode"
 	"goro/internal/queue"
 )
 
@@ -34,8 +35,9 @@ func Start(q *queue.Queue, s uploader, hlsConfig config.HLSConfig, thumbnailConf
 
 		log.Printf("processing job %d for video %d", job.ID, job.VideoID)
 		if err := processJob(context.Background(), q, s, job, hlsConfig, thumbnailConfig); err != nil {
-			log.Printf("job %d failed: %v", job.ID, err)
-			q.MarkFailed(job.ID, err)
+			failure := errcode.ErrJobProcessingFailed
+			log.Printf("job %d failed: code=%s message=%s detail=%v", job.ID, failure.Code, failure.Message, err)
+			q.MarkFailed(job.ID, failure.Code, failure.Message)
 		} else {
 			q.MarkDone(job.ID)
 		}

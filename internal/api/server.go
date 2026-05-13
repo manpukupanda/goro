@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"goro/internal/config"
+	"goro/internal/errcode"
 	"goro/internal/queue"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,10 @@ type Server struct {
 	hlsConfig   config.HLSConfig
 	tokenConfig config.PlaylistTokenConfig
 	apiKey      string
+}
+
+func writeError(c *gin.Context, status int, message string) {
+	c.JSON(status, errcode.FromMessage(message))
 }
 
 func NewServer(database *sql.DB, q *queue.Queue, s storageGetter, slCfg config.SecureLinkConfig, hlsCfg config.HLSConfig, tokenCfg config.PlaylistTokenConfig, apiKey string) *Server {
@@ -80,7 +85,7 @@ func (s *Server) requireAPIKey(c *gin.Context) {
 	const prefix = "Bearer "
 	header := c.GetHeader("Authorization")
 	if !strings.HasPrefix(header, prefix) || strings.TrimPrefix(header, prefix) != s.apiKey {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		c.AbortWithStatusJSON(http.StatusUnauthorized, errcode.FromMessage("unauthorized"))
 		return
 	}
 	c.Next()
@@ -201,7 +206,7 @@ func (s *Server) listVideos(c *gin.Context) {
 
 	rows, err := s.db.QueryContext(c.Request.Context(), q, args...)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query videos"})
+		writeError(c, http.StatusInternalServerError, "failed to query videos")
 		return
 	}
 	defer rows.Close()
@@ -233,7 +238,7 @@ func (s *Server) listVideos(c *gin.Context) {
 			&containerFormat, &audioCodec, &audioBitrate, &sampleRate, &channels,
 			&fileSize, &aspectRatio, &rotation, &hasAudio, &hasVideo,
 		); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to scan video"})
+			writeError(c, http.StatusInternalServerError, "failed to scan video")
 			return
 		}
 		if durationSec.Valid {
@@ -296,7 +301,7 @@ func (s *Server) listVideos(c *gin.Context) {
 		videos = append(videos, v)
 	}
 	if err := rows.Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to iterate videos"})
+		writeError(c, http.StatusInternalServerError, "failed to iterate videos")
 		return
 	}
 
@@ -340,30 +345,30 @@ func (s *Server) resolveProfile(requested string, allow func(config.ProfileForma
 func (s *Server) uploadVideo(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		writeError(c, http.StatusBadRequest, "file is required")
 		return
 	}
 	if !strings.EqualFold(filepath.Ext(file.Filename), ".mp4") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only .mp4 is supported"})
+		writeError(c, http.StatusBadRequest, "only .mp4 is supported")
 		return
 	}
 
 	tmpDir, err := os.MkdirTemp("", "goro-upload-")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare upload directory"})
+		writeError(c, http.StatusInternalServerError, "failed to prepare upload directory")
 		return
 	}
 	inputPath := filepath.Join(tmpDir, "input.mp4")
 	if err := c.SaveUploadedFile(file, inputPath); err != nil {
 		_ = os.RemoveAll(tmpDir)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save uploaded file"})
+		writeError(c, http.StatusInternalServerError, "failed to save uploaded file")
 		return
 	}
 
 	publicID, err := s.queue.EnqueueVideo(file.Filename, inputPath)
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create video job"})
+		writeError(c, http.StatusInternalServerError, "failed to create video job")
 		return
 	}
 
@@ -388,14 +393,14 @@ func (s *Server) getPlaylist(c *gin.Context) {
 		return format.IsHLS()
 	})
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "valid hls profile is required"})
+		writeError(c, http.StatusBadRequest, "valid hls profile is required")
 		return
 	}
 
 	objectName := fmt.Sprintf("videos/%s/%s/index.m3u8", id, profile.Name)
 	rc, _, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "playlist not found"})
+		writeError(c, http.StatusNotFound, "playlist not found")
 		return
 	}
 	defer rc.Close()
@@ -403,7 +408,7 @@ func (s *Server) getPlaylist(c *gin.Context) {
 	expires := time.Now().Unix() + int64(s.secureLink.TTLSec)
 	out, err := rewritePlaylist(rc, id, profile.Name, expires, s.secureLink.Secret)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process playlist"})
+		writeError(c, http.StatusInternalServerError, "failed to process playlist")
 		return
 	}
 
@@ -426,14 +431,14 @@ func (s *Server) getManifest(c *gin.Context) {
 		return format.IsDASH()
 	})
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "valid dash profile is required"})
+		writeError(c, http.StatusBadRequest, "valid dash profile is required")
 		return
 	}
 
 	objectName := fmt.Sprintf("videos/%s/%s/index.mpd", id, profile.Name)
 	rc, _, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "manifest not found"})
+		writeError(c, http.StatusNotFound, "manifest not found")
 		return
 	}
 	defer rc.Close()
@@ -441,7 +446,7 @@ func (s *Server) getManifest(c *gin.Context) {
 	expires := time.Now().Unix() + int64(s.secureLink.TTLSec)
 	out, err := rewriteManifest(rc, id, profile.Name, expires, s.secureLink.Secret)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process manifest"})
+		writeError(c, http.StatusInternalServerError, "failed to process manifest")
 		return
 	}
 
@@ -457,11 +462,11 @@ func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
 	err := s.db.QueryRowContext(c.Request.Context(),
 		`SELECT id, visibility FROM videos WHERE public_id = ?`, publicID).Scan(&videoID, &visibility)
 	if err == sql.ErrNoRows {
-		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		writeError(c, http.StatusNotFound, "video not found")
 		return err
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		writeError(c, http.StatusInternalServerError, "failed to look up video")
 		return err
 	}
 
@@ -472,7 +477,7 @@ func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
 	// Private: validate token.
 	token := c.Query("token")
 	if token == "" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "token is required"})
+		writeError(c, http.StatusForbidden, "token is required")
 		return fmt.Errorf("missing token")
 	}
 
@@ -481,21 +486,21 @@ func (s *Server) authorizePlaylist(c *gin.Context, publicID string) error {
 		`SELECT expires_at FROM playlist_tokens WHERE token = ? AND video_id = ?`,
 		token, videoID).Scan(&expiresAtStr)
 	if err == sql.ErrNoRows {
-		c.JSON(http.StatusForbidden, gin.H{"error": "invalid or expired token"})
+		writeError(c, http.StatusForbidden, "invalid or expired token")
 		return fmt.Errorf("token not found")
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate token"})
+		writeError(c, http.StatusInternalServerError, "failed to validate token")
 		return err
 	}
 
 	expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse token expiry"})
+		writeError(c, http.StatusInternalServerError, "failed to parse token expiry")
 		return err
 	}
 	if time.Now().After(expiresAt) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "invalid or expired token"})
+		writeError(c, http.StatusForbidden, "invalid or expired token")
 		return fmt.Errorf("token expired")
 	}
 
@@ -514,39 +519,39 @@ func (s *Server) deleteVideo(c *gin.Context) {
 	err := s.db.QueryRowContext(c.Request.Context(),
 		`SELECT id FROM videos WHERE public_id = ?`, publicID).Scan(&videoID)
 	if err == sql.ErrNoRows {
-		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		writeError(c, http.StatusNotFound, "video not found")
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		writeError(c, http.StatusInternalServerError, "failed to look up video")
 		return
 	}
 
 	// Delete dependent rows atomically.
 	tx, err := s.db.BeginTx(c.Request.Context(), nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to begin transaction"})
+		writeError(c, http.StatusInternalServerError, "failed to begin transaction")
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM playlist_tokens WHERE video_id = ?`, videoID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete tokens"})
+		writeError(c, http.StatusInternalServerError, "failed to delete tokens")
 		return
 	}
 	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM jobs WHERE video_id = ?`, videoID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete jobs"})
+		writeError(c, http.StatusInternalServerError, "failed to delete jobs")
 		return
 	}
 	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM videos WHERE id = ?`, videoID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete video"})
+		writeError(c, http.StatusInternalServerError, "failed to delete video")
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to commit transaction"})
+		writeError(c, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
 
@@ -565,23 +570,23 @@ func (s *Server) setVisibility(c *gin.Context) {
 		Visibility string `json:"visibility" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "visibility is required"})
+		writeError(c, http.StatusBadRequest, "visibility is required")
 		return
 	}
 	if body.Visibility != "public" && body.Visibility != "private" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "visibility must be 'public' or 'private'"})
+		writeError(c, http.StatusBadRequest, "visibility must be 'public' or 'private'")
 		return
 	}
 
 	res, err := s.db.ExecContext(c.Request.Context(),
 		`UPDATE videos SET visibility = ? WHERE public_id = ?`, body.Visibility, publicID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update visibility"})
+		writeError(c, http.StatusInternalServerError, "failed to update visibility")
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		writeError(c, http.StatusNotFound, "video not found")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"visibility": body.Visibility})
@@ -595,17 +600,17 @@ func (s *Server) issueToken(c *gin.Context) {
 	err := s.db.QueryRowContext(c.Request.Context(),
 		`SELECT id FROM videos WHERE public_id = ?`, publicID).Scan(&videoID)
 	if err == sql.ErrNoRows {
-		c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+		writeError(c, http.StatusNotFound, "video not found")
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		writeError(c, http.StatusInternalServerError, "failed to look up video")
 		return
 	}
 
 	token, err := newToken(32)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		writeError(c, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
 	expiresAt := time.Now().Add(time.Duration(s.tokenConfig.TTLSec) * time.Second)
@@ -614,7 +619,7 @@ func (s *Server) issueToken(c *gin.Context) {
 		`INSERT INTO playlist_tokens (token, video_id, expires_at) VALUES (?, ?, ?)`,
 		token, videoID, expiresAt.UTC().Format(time.RFC3339))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store token"})
+		writeError(c, http.StatusInternalServerError, "failed to store token")
 		return
 	}
 
@@ -753,18 +758,18 @@ func (s *Server) downloadVideo(c *gin.Context) {
 	err := s.db.QueryRowContext(c.Request.Context(),
 		`SELECT original_name FROM videos WHERE public_id = ? AND status = 'ready'`, publicID).Scan(&originalName)
 	if err == sql.ErrNoRows {
-		c.JSON(http.StatusNotFound, gin.H{"error": "video not found or not ready"})
+		writeError(c, http.StatusNotFound, "video not found or not ready")
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up video"})
+		writeError(c, http.StatusInternalServerError, "failed to look up video")
 		return
 	}
 
 	objectName := fmt.Sprintf("videos/%s/original.mp4", publicID)
 	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "original file not found"})
+		writeError(c, http.StatusNotFound, "original file not found")
 		return
 	}
 	defer rc.Close()
@@ -805,14 +810,14 @@ func (s *Server) getStreamingAsset(c *gin.Context) {
 	profile := c.Param("profile")
 	asset := strings.TrimPrefix(c.Param("asset"), "/")
 	if asset == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
+		writeError(c, http.StatusNotFound, "asset not found")
 		return
 	}
 
 	objectName := fmt.Sprintf("videos/%s/%s/%s", id, profile, asset)
 	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
+		writeError(c, http.StatusNotFound, "asset not found")
 		return
 	}
 	defer rc.Close()

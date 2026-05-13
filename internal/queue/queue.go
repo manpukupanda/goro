@@ -137,12 +137,12 @@ type VideoMetadata struct {
 	Framerate       string // rational string e.g. "30000/1001"; empty if unknown
 	ContainerFormat string // e.g. "mov", "matroska"
 	AudioCodec      string
-	AudioBitrate    int64 // bits per second (audio stream)
-	SampleRate      int   // Hz
-	Channels        int   // number of audio channels
-	FileSize        int64 // bytes
+	AudioBitrate    int64  // bits per second (audio stream)
+	SampleRate      int    // Hz
+	Channels        int    // number of audio channels
+	FileSize        int64  // bytes
 	AspectRatio     string // e.g. "16:9"
-	Rotation        int   // degrees, e.g. 90
+	Rotation        int    // degrees, e.g. 90
 	HasAudio        bool
 	HasVideo        bool
 }
@@ -214,7 +214,7 @@ func (q *Queue) UpdateVideoMetadata(publicID string, meta VideoMetadata) error {
 	return err
 }
 
-func (q *Queue) MarkFailed(id int64, failureErr error) {
+func (q *Queue) MarkFailed(id int64, errorCode, errorMessage string) {
 	tx, err := q.db.Begin()
 	if err != nil {
 		log.Printf("failed to begin failed transaction: %v", err)
@@ -222,12 +222,7 @@ func (q *Queue) MarkFailed(id int64, failureErr error) {
 	}
 	defer tx.Rollback()
 
-	message := ""
-	if failureErr != nil {
-		message = failureErr.Error()
-	}
-
-	if _, err := tx.Exec(`UPDATE jobs SET status='failed', error_message=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, message, id); err != nil {
+	if _, err := tx.Exec(`UPDATE jobs SET status='failed', error_code=?, error_message=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, errorCode, errorMessage, id); err != nil {
 		log.Printf("failed to mark failed: %v", err)
 		return
 	}

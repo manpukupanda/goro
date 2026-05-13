@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     video_id INTEGER NOT NULL,
     status TEXT NOT NULL,
     input TEXT NOT NULL,
+    error_code TEXT,
     error_message TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
