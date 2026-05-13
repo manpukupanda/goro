@@ -22,6 +22,7 @@ import (
 	"goro/internal/config"
 	"goro/internal/errcode"
 	"goro/internal/queue"
+	"goro/internal/referrer"
 
 	"github.com/gin-gonic/gin"
 )
@@ -90,6 +91,7 @@ func (s *Server) Router() *gin.Engine {
 		api.GET("/videos", s.listVideos)
 		api.POST("/videos", s.uploadVideo)
 		api.PUT("/videos/:id/visibility", s.setVisibility)
+		api.PUT("/videos/:id/referrer-whitelist", s.setReferrerWhitelist)
 		api.DELETE("/videos/:id", s.deleteVideo)
 		api.GET("/videos/:id/playlist", s.getPlaylist)
 		api.GET("/videos/:id/manifest", s.getManifest)
@@ -208,31 +210,32 @@ func (s *Server) resolveProfile(requested string, allow func(config.ProfileForma
 //   - height_max   – height <= value (pixels)
 func (s *Server) listVideos(c *gin.Context) {
 	type videoRow struct {
-		PublicID        string   `json:"public_id"`
-		OriginalName    string   `json:"original_name"`
-		Status          string   `json:"status"`
-		Visibility      string   `json:"visibility"`
-		CreatedAt       string   `json:"created_at"`
-		DurationSec     *float64 `json:"duration_sec,omitempty"`
-		Width           *int     `json:"width,omitempty"`
-		Height          *int     `json:"height,omitempty"`
-		VideoCodec      *string  `json:"video_codec,omitempty"`
-		Bitrate         *int64   `json:"bitrate,omitempty"`
-		Framerate       *string  `json:"framerate,omitempty"`
-		FramerateFloat  *float64 `json:"framerate_float,omitempty"`
-		ContainerFormat *string  `json:"container_format,omitempty"`
-		AudioCodec      *string  `json:"audio_codec,omitempty"`
-		AudioBitrate    *int64   `json:"audio_bitrate,omitempty"`
-		SampleRate      *int     `json:"sample_rate,omitempty"`
-		Channels        *int     `json:"channels,omitempty"`
-		FileSize        *int64   `json:"file_size,omitempty"`
-		AspectRatio     *string  `json:"aspect_ratio,omitempty"`
-		Rotation        *int     `json:"rotation,omitempty"`
-		HasAudio        *bool    `json:"has_audio,omitempty"`
-		HasVideo        *bool    `json:"has_video,omitempty"`
+		PublicID          string   `json:"public_id"`
+		OriginalName      string   `json:"original_name"`
+		Status            string   `json:"status"`
+		Visibility        string   `json:"visibility"`
+		ReferrerWhitelist []string `json:"referrer_whitelist"`
+		CreatedAt         string   `json:"created_at"`
+		DurationSec       *float64 `json:"duration_sec,omitempty"`
+		Width             *int     `json:"width,omitempty"`
+		Height            *int     `json:"height,omitempty"`
+		VideoCodec        *string  `json:"video_codec,omitempty"`
+		Bitrate           *int64   `json:"bitrate,omitempty"`
+		Framerate         *string  `json:"framerate,omitempty"`
+		FramerateFloat    *float64 `json:"framerate_float,omitempty"`
+		ContainerFormat   *string  `json:"container_format,omitempty"`
+		AudioCodec        *string  `json:"audio_codec,omitempty"`
+		AudioBitrate      *int64   `json:"audio_bitrate,omitempty"`
+		SampleRate        *int     `json:"sample_rate,omitempty"`
+		Channels          *int     `json:"channels,omitempty"`
+		FileSize          *int64   `json:"file_size,omitempty"`
+		AspectRatio       *string  `json:"aspect_ratio,omitempty"`
+		Rotation          *int     `json:"rotation,omitempty"`
+		HasAudio          *bool    `json:"has_audio,omitempty"`
+		HasVideo          *bool    `json:"has_video,omitempty"`
 	}
 
-	base := `SELECT public_id, original_name, status, visibility, created_at,
+	base := `SELECT public_id, original_name, status, visibility, referrer_whitelist, created_at,
 		duration_sec, width, height, video_codec, bitrate, framerate,
 		container_format, audio_codec, audio_bitrate, sample_rate, channels,
 		file_size, aspect_ratio, rotation, has_audio, has_video
@@ -311,25 +314,26 @@ func (s *Server) listVideos(c *gin.Context) {
 	for rows.Next() {
 		var v videoRow
 		var (
-			durationSec     sql.NullFloat64
-			width           sql.NullInt64
-			height          sql.NullInt64
-			videoCodec      sql.NullString
-			bitrate         sql.NullInt64
-			framerate       sql.NullString
-			containerFormat sql.NullString
-			audioCodec      sql.NullString
-			audioBitrate    sql.NullInt64
-			sampleRate      sql.NullInt64
-			channels        sql.NullInt64
-			fileSize        sql.NullInt64
-			aspectRatio     sql.NullString
-			rotation        sql.NullInt64
-			hasAudio        sql.NullInt64
-			hasVideo        sql.NullInt64
+			durationSec       sql.NullFloat64
+			width             sql.NullInt64
+			height            sql.NullInt64
+			videoCodec        sql.NullString
+			bitrate           sql.NullInt64
+			framerate         sql.NullString
+			containerFormat   sql.NullString
+			audioCodec        sql.NullString
+			audioBitrate      sql.NullInt64
+			sampleRate        sql.NullInt64
+			channels          sql.NullInt64
+			fileSize          sql.NullInt64
+			aspectRatio       sql.NullString
+			rotation          sql.NullInt64
+			hasAudio          sql.NullInt64
+			hasVideo          sql.NullInt64
+			referrerWhitelist sql.NullString
 		)
 		if err := rows.Scan(
-			&v.PublicID, &v.OriginalName, &v.Status, &v.Visibility, &v.CreatedAt,
+			&v.PublicID, &v.OriginalName, &v.Status, &v.Visibility, &referrerWhitelist, &v.CreatedAt,
 			&durationSec, &width, &height, &videoCodec, &bitrate, &framerate,
 			&containerFormat, &audioCodec, &audioBitrate, &sampleRate, &channels,
 			&fileSize, &aspectRatio, &rotation, &hasAudio, &hasVideo,
@@ -393,6 +397,11 @@ func (s *Server) listVideos(c *gin.Context) {
 		if hasVideo.Valid {
 			hv := hasVideo.Int64 != 0
 			v.HasVideo = &hv
+		}
+		if referrerWhitelist.Valid {
+			v.ReferrerWhitelist = referrer.DecodeWhitelist(referrerWhitelist.String)
+		} else {
+			v.ReferrerWhitelist = []string{}
 		}
 		videos = append(videos, v)
 	}
@@ -534,6 +543,36 @@ func (s *Server) setVisibility(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"visibility": body.Visibility})
+}
+
+func (s *Server) setReferrerWhitelist(c *gin.Context) {
+	publicID := c.Param("id")
+	var body struct {
+		ReferrerWhitelist []string `json:"referrer_whitelist"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	normalized, err := referrer.NormalizeWhitelist(body.ReferrerWhitelist)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "referrer whitelist must contain domains only")
+		return
+	}
+
+	res, err := s.db.ExecContext(c.Request.Context(),
+		`UPDATE videos SET referrer_whitelist = ? WHERE public_id = ?`, referrer.EncodeWhitelist(normalized), publicID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "failed to update referrer whitelist")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		writeError(c, http.StatusNotFound, "video not found")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"referrer_whitelist": normalized})
 }
 
 // getPlaylist proxies the HLS playlist from storage (no secure-link rewriting;

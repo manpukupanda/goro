@@ -83,6 +83,9 @@ export const api = {
   setVisibility(id, visibility) {
     return request('PUT', `/videos/${id}/visibility`, { visibility });
   },
+  setReferrerWhitelist(id, referrer_whitelist) {
+    return request('PUT', `/videos/${id}/referrer-whitelist`, { referrer_whitelist });
+  },
   getStreamURL(id, profile, format) {
     const path = format === 'dash_fmp4' ? 'manifest' : 'playlist';
     return `${BASE}/videos/${id}/${path}?profile=${encodeURIComponent(profile)}`;

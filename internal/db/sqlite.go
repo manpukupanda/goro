@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS videos (
     temp_path     TEXT    NOT NULL,
     status        TEXT    NOT NULL,
     visibility    TEXT    NOT NULL DEFAULT 'private',
+    referrer_whitelist TEXT NOT NULL DEFAULT '',
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
     duration_sec     REAL,
     width            INTEGER,
