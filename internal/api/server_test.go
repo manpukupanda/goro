@@ -18,6 +18,7 @@ import (
 
 	"goro/internal/config"
 	"goro/internal/db"
+	"goro/internal/errcode"
 	"goro/internal/queue"
 )
 
@@ -50,6 +51,23 @@ func newTestServer(t *testing.T, database *sql.DB) *Server {
 // authRequest attaches the test API key to a request.
 func authRequest(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+testAPIKey)
+}
+
+func assertErrorResponse(t *testing.T, body []byte, wantCode, wantMessage string) {
+	t.Helper()
+	var got struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if got.Code != wantCode {
+		t.Fatalf("expected error code %q, got %q", wantCode, got.Code)
+	}
+	if got.Message != wantMessage {
+		t.Fatalf("expected error message %q, got %q", wantMessage, got.Message)
+	}
 }
 
 func TestUploadVideoCreatesVideoAndJob(t *testing.T) {
@@ -142,6 +160,7 @@ func TestUploadVideoRejectsNonMP4(t *testing.T) {
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
 	}
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeVideoUnsupportedFormat, "only .mp4 is supported")
 }
 
 func TestGetPlaylistRewritesSegmentURLs(t *testing.T) {
@@ -589,6 +608,7 @@ func TestGetPlaylistPrivateWithoutToken(t *testing.T) {
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 without token, got %d", res.Code)
 	}
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeTokenRequired, "token is required")
 }
 
 func TestGetPlaylistPrivateWithExpiredToken(t *testing.T) {
@@ -617,6 +637,7 @@ func TestGetPlaylistPrivateWithExpiredToken(t *testing.T) {
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 with expired token, got %d", res.Code)
 	}
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeTokenInvalidOrExpired, "invalid or expired token")
 }
 
 func TestNewToken(t *testing.T) {
