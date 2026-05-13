@@ -1,5 +1,7 @@
 package errcode
 
+import "log"
+
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -48,7 +50,7 @@ const (
 )
 
 var (
-	InternalError = Error{Code: CodeInternalError, Message: "internal server error"}
+	ErrInternalError = Error{Code: CodeInternalError, Message: "internal server error"}
 
 	ErrAuthUnauthorized            = Error{Code: CodeAuthUnauthorized, Message: "unauthorized"}
 	ErrVideoFileRequired           = Error{Code: CodeVideoFileRequired, Message: "file is required"}
@@ -91,49 +93,63 @@ var (
 	ErrJobProcessingFailed = Error{Code: CodeJobProcessingFailed, Message: "video processing failed"}
 )
 
-var byMessage = map[string]Error{
-	ErrAuthUnauthorized.Message:            ErrAuthUnauthorized,
-	ErrVideoFileRequired.Message:           ErrVideoFileRequired,
-	ErrVideoUnsupportedFormat.Message:      ErrVideoUnsupportedFormat,
-	ErrVideoUploadDirPrepareFailed.Message: ErrVideoUploadDirPrepareFailed,
-	ErrVideoUploadSaveFailed.Message:       ErrVideoUploadSaveFailed,
-	ErrVideoJobCreateFailed.Message:        ErrVideoJobCreateFailed,
-	ErrPlaylistProfileInvalid.Message:      ErrPlaylistProfileInvalid,
-	ErrPlaylistNotFound.Message:            ErrPlaylistNotFound,
-	ErrPlaylistProcessFailed.Message:       ErrPlaylistProcessFailed,
-	ErrManifestProfileInvalid.Message:      ErrManifestProfileInvalid,
-	ErrManifestNotFound.Message:            ErrManifestNotFound,
-	ErrManifestProcessFailed.Message:       ErrManifestProcessFailed,
-	ErrVideoNotFound.Message:               ErrVideoNotFound,
-	ErrTokenRequired.Message:               ErrTokenRequired,
-	ErrTokenInvalidOrExpired.Message:       ErrTokenInvalidOrExpired,
-	ErrTokenValidateFailed.Message:         ErrTokenValidateFailed,
-	ErrTokenExpiryParseFailed.Message:      ErrTokenExpiryParseFailed,
-	ErrDBTransactionBeginFailed.Message:    ErrDBTransactionBeginFailed,
-	ErrTokenDeleteFailed.Message:           ErrTokenDeleteFailed,
-	ErrJobDeleteFailed.Message:             ErrJobDeleteFailed,
-	ErrVideoDeleteFailed.Message:           ErrVideoDeleteFailed,
-	ErrDBTransactionCommitFailed.Message:   ErrDBTransactionCommitFailed,
-	ErrVideoVisibilityRequired.Message:     ErrVideoVisibilityRequired,
-	ErrVideoVisibilityInvalid.Message:      ErrVideoVisibilityInvalid,
-	ErrVideoVisibilityUpdateFailed.Message: ErrVideoVisibilityUpdateFailed,
-	ErrTokenGenerateFailed.Message:         ErrTokenGenerateFailed,
-	ErrTokenStoreFailed.Message:            ErrTokenStoreFailed,
-	ErrVideoNotReady.Message:               ErrVideoNotReady,
-	ErrVideoOriginalNotFound.Message:       ErrVideoOriginalNotFound,
-	ErrStreamAssetNotFound.Message:         ErrStreamAssetNotFound,
-	ErrVideoQueryFailed.Message:            ErrVideoQueryFailed,
-	ErrVideoScanFailed.Message:             ErrVideoScanFailed,
-	ErrVideoIterateFailed.Message:          ErrVideoIterateFailed,
-	ErrJobQueryFailed.Message:              ErrJobQueryFailed,
-	ErrJobScanFailed.Message:               ErrJobScanFailed,
-	ErrJobIterateFailed.Message:            ErrJobIterateFailed,
-	ErrThumbnailNotFound.Message:           ErrThumbnailNotFound,
+var catalog = []Error{
+	ErrInternalError,
+	ErrAuthUnauthorized,
+	ErrVideoFileRequired,
+	ErrVideoUnsupportedFormat,
+	ErrVideoUploadDirPrepareFailed,
+	ErrVideoUploadSaveFailed,
+	ErrVideoJobCreateFailed,
+	ErrPlaylistProfileInvalid,
+	ErrPlaylistNotFound,
+	ErrPlaylistProcessFailed,
+	ErrManifestProfileInvalid,
+	ErrManifestNotFound,
+	ErrManifestProcessFailed,
+	ErrVideoNotFound,
+	ErrTokenRequired,
+	ErrTokenInvalidOrExpired,
+	ErrTokenValidateFailed,
+	ErrTokenExpiryParseFailed,
+	ErrDBTransactionBeginFailed,
+	ErrTokenDeleteFailed,
+	ErrJobDeleteFailed,
+	ErrVideoDeleteFailed,
+	ErrDBTransactionCommitFailed,
+	ErrVideoVisibilityRequired,
+	ErrVideoVisibilityInvalid,
+	ErrVideoVisibilityUpdateFailed,
+	ErrTokenGenerateFailed,
+	ErrTokenStoreFailed,
+	ErrVideoNotReady,
+	ErrVideoOriginalNotFound,
+	ErrStreamAssetNotFound,
+	ErrVideoQueryFailed,
+	ErrVideoScanFailed,
+	ErrVideoIterateFailed,
+	ErrJobQueryFailed,
+	ErrJobScanFailed,
+	ErrJobIterateFailed,
+	ErrThumbnailNotFound,
+	ErrJobProcessingFailed,
 }
+
+var byMessage = func() map[string]Error {
+	m := make(map[string]Error, len(catalog))
+	for _, e := range catalog {
+		if _, exists := m[e.Message]; exists {
+			panic("errcode: duplicate catalog message: " + e.Message)
+		}
+		m[e.Message] = e
+	}
+	return m
+}()
 
 func FromMessage(message string) Error {
 	if e, ok := byMessage[message]; ok {
 		return e
 	}
-	return InternalError
+	log.Printf("errcode: unmapped message %q, fallback code=%s", message, ErrInternalError.Code)
+	return ErrInternalError
 }
