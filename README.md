@@ -38,7 +38,7 @@ In other words, daily product integration should happen through the API; the adm
    make docker-up
    ```
 
-4. Check endpoints:
+4. Check endpoints (default Docker Compose ports):
    - API health: `http://localhost:5600/healthz`
    - Admin console: `http://localhost:5601/admin`
    - Nginx entrypoint: `http://localhost/`
@@ -55,7 +55,7 @@ In other words, daily product integration should happen through the API; the adm
 ## Operations notes (small-scale production)
 
 - **Backup is simple:** aside from object storage data, core state lives in SQLite.
-  - In Docker compose setup, DB path is `/app/data/goro.db` in the goro container (mapped from the host `data/` directory).
+  - In Docker Compose setup, DB path is `/app/data/goro.db` in the goro container (mapped from host `./data/goro.db` under the repository root).
 - **Scaling expectation:** optimized for single-VPS operation.
   - Compute remains on one server.
   - Storage can scale independently by using S3-compatible object storage.
