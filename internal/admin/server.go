@@ -48,8 +48,8 @@ type Server struct {
 	credentials     gin.Accounts
 }
 
-func writeError(c *gin.Context, status int, message string) {
-	c.JSON(status, errcode.FromMessage(message))
+func writeError(c *gin.Context, status int, e errcode.Error) {
+	c.JSON(status, e)
 }
 
 // NewServer creates a new admin Server. It reads GORO_ADMIN_USER and
@@ -305,7 +305,7 @@ func (s *Server) listVideos(c *gin.Context) {
 
 	rows, err := s.db.QueryContext(c.Request.Context(), q, args...)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to query videos")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoQueryFailed)
 		return
 	}
 	defer rows.Close()
@@ -338,7 +338,7 @@ func (s *Server) listVideos(c *gin.Context) {
 			&containerFormat, &audioCodec, &audioBitrate, &sampleRate, &channels,
 			&fileSize, &aspectRatio, &rotation, &hasAudio, &hasVideo,
 		); err != nil {
-			writeError(c, http.StatusInternalServerError, "failed to scan video")
+			writeError(c, http.StatusInternalServerError, errcode.ErrVideoScanFailed)
 			return
 		}
 		if durationSec.Valid {
@@ -406,7 +406,7 @@ func (s *Server) listVideos(c *gin.Context) {
 		videos = append(videos, v)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to iterate videos")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoIterateFailed)
 		return
 	}
 
@@ -434,30 +434,30 @@ func parseRational(r string) float64 {
 func (s *Server) uploadVideo(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		writeError(c, http.StatusBadRequest, "file is required")
+		writeError(c, http.StatusBadRequest, errcode.ErrVideoFileRequired)
 		return
 	}
 	if !strings.EqualFold(filepath.Ext(file.Filename), ".mp4") {
-		writeError(c, http.StatusBadRequest, "only .mp4 is supported")
+		writeError(c, http.StatusBadRequest, errcode.ErrVideoUnsupportedFormat)
 		return
 	}
 
 	tmpDir, err := os.MkdirTemp("", "goro-admin-upload-")
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to prepare upload directory")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoUploadDirPrepareFailed)
 		return
 	}
 	inputPath := filepath.Join(tmpDir, "input.mp4")
 	if err := c.SaveUploadedFile(file, inputPath); err != nil {
 		_ = os.RemoveAll(tmpDir)
-		writeError(c, http.StatusInternalServerError, "failed to save uploaded file")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoUploadSaveFailed)
 		return
 	}
 
 	publicID, err := s.queue.EnqueueVideo(file.Filename, inputPath)
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
-		writeError(c, http.StatusInternalServerError, "failed to create video job")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoJobCreateFailed)
 		return
 	}
 
@@ -474,38 +474,38 @@ func (s *Server) deleteVideo(c *gin.Context) {
 	err := s.db.QueryRowContext(c.Request.Context(),
 		`SELECT id FROM videos WHERE public_id = ?`, publicID).Scan(&videoID)
 	if err == sql.ErrNoRows {
-		writeError(c, http.StatusNotFound, "video not found")
+		writeError(c, http.StatusNotFound, errcode.ErrVideoNotFound)
 		return
 	}
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to look up video")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoLookupFailed)
 		return
 	}
 
 	tx, err := s.db.BeginTx(c.Request.Context(), nil)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to begin transaction")
+		writeError(c, http.StatusInternalServerError, errcode.ErrDBTransactionBeginFailed)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM playlist_tokens WHERE video_id = ?`, videoID); err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to delete tokens")
+		writeError(c, http.StatusInternalServerError, errcode.ErrTokenDeleteFailed)
 		return
 	}
 	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM jobs WHERE video_id = ?`, videoID); err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to delete jobs")
+		writeError(c, http.StatusInternalServerError, errcode.ErrJobDeleteFailed)
 		return
 	}
 	if _, err := tx.ExecContext(c.Request.Context(),
 		`DELETE FROM videos WHERE id = ?`, videoID); err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to delete video")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoDeleteFailed)
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to commit transaction")
+		writeError(c, http.StatusInternalServerError, errcode.ErrDBTransactionCommitFailed)
 		return
 	}
 
@@ -523,23 +523,23 @@ func (s *Server) setVisibility(c *gin.Context) {
 		Visibility string `json:"visibility" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		writeError(c, http.StatusBadRequest, "visibility is required")
+		writeError(c, http.StatusBadRequest, errcode.ErrVideoVisibilityRequired)
 		return
 	}
 	if body.Visibility != "public" && body.Visibility != "private" {
-		writeError(c, http.StatusBadRequest, "visibility must be 'public' or 'private'")
+		writeError(c, http.StatusBadRequest, errcode.ErrVideoVisibilityInvalid)
 		return
 	}
 
 	res, err := s.db.ExecContext(c.Request.Context(),
 		`UPDATE videos SET visibility = ? WHERE public_id = ?`, body.Visibility, publicID)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to update visibility")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoVisibilityUpdateFailed)
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		writeError(c, http.StatusNotFound, "video not found")
+		writeError(c, http.StatusNotFound, errcode.ErrVideoNotFound)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"visibility": body.Visibility})
@@ -551,25 +551,25 @@ func (s *Server) setReferrerWhitelist(c *gin.Context) {
 		ReferrerWhitelist []string `json:"referrer_whitelist"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		writeError(c, http.StatusBadRequest, "invalid request body")
+		writeError(c, http.StatusBadRequest, errcode.ErrRequestBodyInvalid)
 		return
 	}
 
 	normalized, err := referrer.NormalizeWhitelist(body.ReferrerWhitelist)
 	if err != nil {
-		writeError(c, http.StatusBadRequest, "referrer whitelist must contain domains only")
+		writeError(c, http.StatusBadRequest, errcode.ErrVideoReferrerWhitelistInvalid)
 		return
 	}
 
 	res, err := s.db.ExecContext(c.Request.Context(),
 		`UPDATE videos SET referrer_whitelist = ? WHERE public_id = ?`, referrer.EncodeWhitelist(normalized), publicID)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to update referrer whitelist")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoReferrerWhitelistUpdateFailed)
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		writeError(c, http.StatusNotFound, "video not found")
+		writeError(c, http.StatusNotFound, errcode.ErrVideoNotFound)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"referrer_whitelist": normalized})
@@ -583,14 +583,14 @@ func (s *Server) getPlaylist(c *gin.Context) {
 		return format.IsHLS()
 	})
 	if !ok {
-		writeError(c, http.StatusBadRequest, "valid hls profile is required")
+		writeError(c, http.StatusBadRequest, errcode.ErrPlaylistProfileInvalid)
 		return
 	}
 
 	objectName := fmt.Sprintf("videos/%s/%s/index.m3u8", id, profile.Name)
 	rc, _, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		writeError(c, http.StatusNotFound, "playlist not found")
+		writeError(c, http.StatusNotFound, errcode.ErrPlaylistNotFound)
 		return
 	}
 	defer rc.Close()
@@ -598,7 +598,7 @@ func (s *Server) getPlaylist(c *gin.Context) {
 	// Rewrite segment lines to point to the admin HLS proxy endpoint.
 	out, err := rewriteAdminPlaylist(rc, id, profile.Name)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to process playlist")
+		writeError(c, http.StatusInternalServerError, errcode.ErrPlaylistProcessFailed)
 		return
 	}
 
@@ -612,21 +612,21 @@ func (s *Server) getManifest(c *gin.Context) {
 		return format.IsDASH()
 	})
 	if !ok {
-		writeError(c, http.StatusBadRequest, "valid dash profile is required")
+		writeError(c, http.StatusBadRequest, errcode.ErrManifestProfileInvalid)
 		return
 	}
 
 	objectName := fmt.Sprintf("videos/%s/%s/index.mpd", id, profile.Name)
 	rc, _, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		writeError(c, http.StatusNotFound, "manifest not found")
+		writeError(c, http.StatusNotFound, errcode.ErrManifestNotFound)
 		return
 	}
 	defer rc.Close()
 
 	out, err := rewriteAdminManifest(rc, id, profile.Name)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to process manifest")
+		writeError(c, http.StatusInternalServerError, errcode.ErrManifestProcessFailed)
 		return
 	}
 
@@ -642,18 +642,18 @@ func (s *Server) downloadVideo(c *gin.Context) {
 	err := s.db.QueryRowContext(c.Request.Context(),
 		`SELECT original_name FROM videos WHERE public_id = ? AND status = 'ready'`, publicID).Scan(&originalName)
 	if err == sql.ErrNoRows {
-		writeError(c, http.StatusNotFound, "video not found or not ready")
+		writeError(c, http.StatusNotFound, errcode.ErrVideoNotReady)
 		return
 	}
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to look up video")
+		writeError(c, http.StatusInternalServerError, errcode.ErrVideoLookupFailed)
 		return
 	}
 
 	objectName := fmt.Sprintf("videos/%s/original.mp4", publicID)
 	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		writeError(c, http.StatusNotFound, "original file not found")
+		writeError(c, http.StatusNotFound, errcode.ErrVideoOriginalNotFound)
 		return
 	}
 	defer rc.Close()
@@ -692,14 +692,14 @@ func (s *Server) getStreamingAsset(c *gin.Context) {
 	profile := c.Param("profile")
 	asset := strings.TrimPrefix(c.Param("asset"), "/")
 	if asset == "" {
-		writeError(c, http.StatusNotFound, "asset not found")
+		writeError(c, http.StatusNotFound, errcode.ErrStreamAssetNotFound)
 		return
 	}
 
 	objectName := fmt.Sprintf("videos/%s/%s/%s", id, profile, asset)
 	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		writeError(c, http.StatusNotFound, "asset not found")
+		writeError(c, http.StatusNotFound, errcode.ErrStreamAssetNotFound)
 		return
 	}
 	defer rc.Close()
@@ -721,7 +721,7 @@ JOIN videos v ON v.id = j.video_id
 ORDER BY j.created_at DESC
 `)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to query jobs")
+		writeError(c, http.StatusInternalServerError, errcode.ErrJobQueryFailed)
 		return
 	}
 	defer rows.Close()
@@ -740,13 +740,13 @@ ORDER BY j.created_at DESC
 	for rows.Next() {
 		var j jobRow
 		if err := rows.Scan(&j.ID, &j.VideoPublicID, &j.Status, &j.CreatedAt, &j.UpdatedAt, &j.ErrorCode, &j.ErrorMessage); err != nil {
-			writeError(c, http.StatusInternalServerError, "failed to scan job")
+			writeError(c, http.StatusInternalServerError, errcode.ErrJobScanFailed)
 			return
 		}
 		jobs = append(jobs, j)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to iterate jobs")
+		writeError(c, http.StatusInternalServerError, errcode.ErrJobIterateFailed)
 		return
 	}
 
@@ -784,7 +784,7 @@ func (s *Server) getThumbnail(c *gin.Context) {
 	objectName := fmt.Sprintf("videos/%s/thumbnails/%s.jpg", id, name)
 	rc, size, err := s.storage.GetObject(c.Request.Context(), objectName)
 	if err != nil {
-		writeError(c, http.StatusNotFound, "thumbnail not found")
+		writeError(c, http.StatusNotFound, errcode.ErrThumbnailNotFound)
 		return
 	}
 	defer rc.Close()

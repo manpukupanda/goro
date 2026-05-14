@@ -160,7 +160,7 @@ func TestUploadVideoRejectsNonMP4(t *testing.T) {
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
 	}
-	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeVideoUnsupportedFormat, "only .mp4 is supported")
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeVideoUnsupportedFormat, errcode.ErrVideoUnsupportedFormat.Message)
 }
 
 func TestGetPlaylistRewritesSegmentURLs(t *testing.T) {
@@ -558,7 +558,7 @@ func TestSetReferrerWhitelistInvalid(t *testing.T) {
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", res.Code)
 	}
-	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeVideoReferrerWhitelistInvalid, "referrer whitelist must contain domains only")
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeVideoReferrerWhitelistInvalid, errcode.ErrVideoReferrerWhitelistInvalid.Message)
 }
 
 func TestIssueToken(t *testing.T) {
@@ -651,7 +651,7 @@ func TestGetPlaylistPrivateWithoutToken(t *testing.T) {
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 without token, got %d", res.Code)
 	}
-	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeTokenRequired, "token is required")
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeTokenRequired, errcode.ErrTokenRequired.Message)
 }
 
 func TestGetPlaylistPrivateWithExpiredToken(t *testing.T) {
@@ -680,7 +680,7 @@ func TestGetPlaylistPrivateWithExpiredToken(t *testing.T) {
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 with expired token, got %d", res.Code)
 	}
-	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeTokenInvalidOrExpired, "invalid or expired token")
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeTokenInvalidOrExpired, errcode.ErrTokenInvalidOrExpired.Message)
 }
 
 func TestGetPlaylistReferrerWhitelist(t *testing.T) {
@@ -729,7 +729,7 @@ func TestGetPlaylistReferrerWhitelist(t *testing.T) {
 				t.Fatalf("expected %d, got %d: %s", tc.want, res.Code, res.Body.String())
 			}
 			if tc.want == http.StatusForbidden {
-				assertErrorResponse(t, res.Body.Bytes(), errcode.CodeRefererNotAllowed, "referer is not allowed")
+				assertErrorResponse(t, res.Body.Bytes(), errcode.CodeRefererNotAllowed, errcode.ErrRefererNotAllowed.Message)
 			}
 		})
 	}
@@ -768,7 +768,7 @@ func TestGetPlaylistPrivateRequiresRefererWhenWhitelistConfigured(t *testing.T) 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 without referer, got %d", res.Code)
 	}
-	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeRefererNotAllowed, "referer is not allowed")
+	assertErrorResponse(t, res.Body.Bytes(), errcode.CodeRefererNotAllowed, errcode.ErrRefererNotAllowed.Message)
 }
 
 func TestManifestAndDashAssetApplyReferrerWhitelist(t *testing.T) {
@@ -810,7 +810,7 @@ func TestManifestAndDashAssetApplyReferrerWhitelist(t *testing.T) {
 	if resAssetDenied.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for dash asset without referer, got %d", resAssetDenied.Code)
 	}
-	assertErrorResponse(t, resAssetDenied.Body.Bytes(), errcode.CodeRefererNotAllowed, "referer is not allowed")
+	assertErrorResponse(t, resAssetDenied.Body.Bytes(), errcode.CodeRefererNotAllowed, errcode.ErrRefererNotAllowed.Message)
 
 	reqAssetAllowed := httptest.NewRequest(http.MethodGet, "/dash/videos/"+videoID+"/"+profile+"/"+asset, nil)
 	reqAssetAllowed.Header.Set("Referer", "https://example.com/watch")
