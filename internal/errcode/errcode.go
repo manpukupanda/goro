@@ -1,7 +1,5 @@
 package errcode
 
-import "log"
-
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -23,6 +21,7 @@ const (
 	CodeManifestNotFound                   = "MANIFEST_NOT_FOUND"
 	CodeManifestProcessFailed              = "MANIFEST_PROCESS_FAILED"
 	CodeVideoNotFound                      = "VIDEO_NOT_FOUND"
+	CodeVideoLookupFailed                  = "VIDEO_LOOKUP_FAILED"
 	CodeTokenRequired                      = "TOKEN_REQUIRED"
 	CodeTokenInvalidOrExpired              = "TOKEN_INVALID_OR_EXPIRED"
 	CodeTokenValidateFailed                = "TOKEN_VALIDATE_FAILED"
@@ -70,6 +69,7 @@ var (
 	ErrManifestNotFound                   = Error{Code: CodeManifestNotFound, Message: "manifest not found"}
 	ErrManifestProcessFailed              = Error{Code: CodeManifestProcessFailed, Message: "failed to process manifest"}
 	ErrVideoNotFound                      = Error{Code: CodeVideoNotFound, Message: "video not found"}
+	ErrVideoLookupFailed                  = Error{Code: CodeVideoLookupFailed, Message: "failed to look up video"}
 	ErrTokenRequired                      = Error{Code: CodeTokenRequired, Message: "token is required"}
 	ErrTokenInvalidOrExpired              = Error{Code: CodeTokenInvalidOrExpired, Message: "invalid or expired token"}
 	ErrTokenValidateFailed                = Error{Code: CodeTokenValidateFailed, Message: "failed to validate token"}
@@ -117,6 +117,7 @@ var catalog = []Error{
 	ErrManifestNotFound,
 	ErrManifestProcessFailed,
 	ErrVideoNotFound,
+	ErrVideoLookupFailed,
 	ErrTokenRequired,
 	ErrTokenInvalidOrExpired,
 	ErrTokenValidateFailed,
@@ -145,23 +146,4 @@ var catalog = []Error{
 	ErrJobIterateFailed,
 	ErrThumbnailNotFound,
 	ErrJobProcessingFailed,
-}
-
-var byMessage = func() map[string]Error {
-	m := make(map[string]Error, len(catalog))
-	for _, e := range catalog {
-		if _, exists := m[e.Message]; exists {
-			panic("errcode: duplicate catalog message: " + e.Message)
-		}
-		m[e.Message] = e
-	}
-	return m
-}()
-
-func FromMessage(message string) Error {
-	if e, ok := byMessage[message]; ok {
-		return e
-	}
-	log.Printf("errcode: unmapped message %q, fallback code=%s", message, ErrInternalError.Code)
-	return ErrInternalError
 }
